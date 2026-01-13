@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // loadAPIKey loads the Anthropic API key from the keys file
@@ -100,4 +102,92 @@ func TestLiveAnthropicProxy(t *testing.T) {
 	}
 
 	t.Logf("Live proxy test successful! Response ID: %v", response["id"])
+}
+
+func TestLiveAnthropicProxyWithLogging(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping live test in short mode")
+	}
+
+	apiKey := loadAPIKey(t)
+	tmpDir := t.TempDir()
+
+	// Start our proxy server with logging
+	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+	defer srv.Close()
+
+	proxy := httptest.NewServer(srv)
+	defer proxy.Close()
+
+	// Build request through our proxy
+	proxyURL := proxy.URL + "/anthropic/api.anthropic.com/v1/messages"
+
+	requestBody := map[string]interface{}{
+		"model":      "claude-3-haiku-20240307",
+		"max_tokens": 10,
+		"messages": []map[string]string{
+			{"role": "user", "content": "Say 'logged' and nothing else."},
+		},
+	}
+
+	bodyBytes, _ := json.Marshal(requestBody)
+	req, _ := http.NewRequest("POST", proxyURL, bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Api-Key", apiKey)
+	req.Header.Set("Anthropic-Version", "2023-06-01")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Give logger a moment to flush
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify logs were created
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	if len(logFiles) == 0 {
+		t.Fatal("No log files created")
+	}
+
+	logData, _ := os.ReadFile(logFiles[0])
+	logContent := string(logData)
+
+	// Verify log contents
+	if !strings.Contains(logContent, `"type":"session_start"`) {
+		t.Error("Missing session_start in log")
+	}
+	if !strings.Contains(logContent, `"type":"request"`) {
+		t.Error("Missing request in log")
+	}
+	if !strings.Contains(logContent, `"type":"response"`) {
+		t.Error("Missing response in log")
+	}
+
+	// Verify API key was obfuscated
+	if strings.Contains(logContent, apiKey) {
+		t.Error("API key was not obfuscated in log!")
+	}
+	if !strings.Contains(logContent, "sk-ant-...") {
+		t.Error("Obfuscated API key format not found")
+	}
+
+	// Verify timing was captured
+	if !strings.Contains(logContent, `"ttfb_ms"`) {
+		t.Error("TTFB timing not captured")
+	}
+
+	t.Logf("Live proxy with logging test successful!")
+	t.Logf("Log file: %s", logFiles[0])
 }
