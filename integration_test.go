@@ -1,0 +1,151 @@
+// integration_test.go
+package main
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestProxySessionTracking(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Track requests received by upstream
+	var receivedRequests []string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedRequests = append(receivedRequests, string(body))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"msg_123","content":[{"type":"text","text":"response"}]}`))
+	}))
+	defer upstream.Close()
+
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+	defer srv.Close()
+
+	// First request
+	body1 := `{"messages":[{"role":"user","content":"hello"}]}`
+	req1 := httptest.NewRequest("POST", "/anthropic/"+upstreamHost+"/v1/messages", strings.NewReader(body1))
+	w1 := httptest.NewRecorder()
+	srv.ServeHTTP(w1, req1)
+
+	// Second request (continuation)
+	body2 := `{"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"response"},{"role":"user","content":"how are you"}]}`
+	req2 := httptest.NewRequest("POST", "/anthropic/"+upstreamHost+"/v1/messages", strings.NewReader(body2))
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+
+	// Give logger time
+	time.Sleep(100 * time.Millisecond)
+
+	// Check that we have session files
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	if len(logFiles) == 0 {
+		t.Fatal("Expected at least one log file")
+	}
+
+	// Verify sessions.db exists
+	dbPath := filepath.Join(tmpDir, "sessions.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Error("sessions.db should exist")
+	}
+}
+
+func TestProxySessionContinuation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"msg_123","content":[{"type":"text","text":"hi there"}]}`))
+	}))
+	defer upstream.Close()
+
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+	defer srv.Close()
+
+	// First request - new session
+	body1 := `{"messages":[{"role":"user","content":"hello"}]}`
+	req1 := httptest.NewRequest("POST", "/anthropic/"+upstreamHost+"/v1/messages", strings.NewReader(body1))
+	w1 := httptest.NewRecorder()
+	srv.ServeHTTP(w1, req1)
+
+	if w1.Code != 200 {
+		t.Fatalf("Expected 200, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// Give logger time to flush
+	time.Sleep(50 * time.Millisecond)
+
+	// Second request (continuation with prior messages matching first exchange)
+	body2 := `{"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi there"},{"role":"user","content":"how are you"}]}`
+	req2 := httptest.NewRequest("POST", "/anthropic/"+upstreamHost+"/v1/messages", strings.NewReader(body2))
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+
+	if w2.Code != 200 {
+		t.Fatalf("Expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// Wait for logging
+	time.Sleep(50 * time.Millisecond)
+
+	// Check log files - should have exactly 1 session file (continuation, not fork)
+	logFiles, err := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	if err != nil {
+		t.Fatalf("Failed to glob: %v", err)
+	}
+	if len(logFiles) != 1 {
+		t.Errorf("Expected 1 log file (same session), got %d", len(logFiles))
+	}
+}
+
+func TestProxyNonConversationEndpointSkipsSessionManager(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"count":100}`))
+	}))
+	defer upstream.Close()
+
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+	defer srv.Close()
+
+	// Token counting endpoint - not a conversation
+	req := httptest.NewRequest("POST", "/anthropic/"+upstreamHost+"/v1/messages/count_tokens", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+
+	// Should still log the request (just not use session manager for fingerprinting)
+	time.Sleep(50 * time.Millisecond)
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	if len(logFiles) == 0 {
+		t.Error("Expected log file even for non-conversation endpoints")
+	}
+}

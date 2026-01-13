@@ -5,10 +5,11 @@ import (
 )
 
 type Server struct {
-	config Config
-	mux    *http.ServeMux
-	proxy  *Proxy
-	logger *Logger
+	config         Config
+	mux            *http.ServeMux
+	proxy          *Proxy
+	logger         *Logger
+	sessionManager *SessionManager
 }
 
 func NewServer(cfg Config) (*Server, error) {
@@ -17,11 +18,18 @@ func NewServer(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	sessionManager, err := NewSessionManager(cfg.LogDir, logger)
+	if err != nil {
+		logger.Close()
+		return nil, err
+	}
+
 	s := &Server{
-		config: cfg,
-		mux:    http.NewServeMux(),
-		proxy:  NewProxyWithLogger(logger),
-		logger: logger,
+		config:         cfg,
+		mux:            http.NewServeMux(),
+		proxy:          NewProxyWithSessionManager(logger, sessionManager),
+		logger:         logger,
+		sessionManager: sessionManager,
 	}
 	s.mux.HandleFunc("/health", s.handleHealth)
 	return s, nil
@@ -44,8 +52,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Close() error {
-	if s.logger != nil {
-		return s.logger.Close()
+	var err error
+	if s.sessionManager != nil {
+		err = s.sessionManager.Close()
 	}
-	return nil
+	if s.logger != nil {
+		if logErr := s.logger.Close(); logErr != nil && err == nil {
+			err = logErr
+		}
+	}
+	return err
 }

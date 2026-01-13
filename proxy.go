@@ -8,42 +8,38 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
 type Proxy struct {
-	client    *http.Client
-	logger    *Logger
-	sessionMu sync.Mutex
-	seqNums   map[string]int
+	client         *http.Client
+	logger         *Logger
+	sessionManager *SessionManager
 }
 
 func NewProxy() *Proxy {
 	return &Proxy{
-		client:  &http.Client{},
-		seqNums: make(map[string]int),
+		client: &http.Client{},
 	}
 }
 
 func NewProxyWithLogger(logger *Logger) *Proxy {
 	return &Proxy{
-		client:  &http.Client{},
-		logger:  logger,
-		seqNums: make(map[string]int),
+		client: &http.Client{},
+		logger: logger,
+	}
+}
+
+func NewProxyWithSessionManager(logger *Logger, sm *SessionManager) *Proxy {
+	return &Proxy{
+		client:         &http.Client{},
+		logger:         logger,
+		sessionManager: sm,
 	}
 }
 
 func (p *Proxy) generateSessionID() string {
 	return time.Now().UTC().Format("20060102-150405") + "-" + randomHex(4)
-}
-
-func (p *Proxy) nextSeq(sessionID string) int {
-	p.sessionMu.Lock()
-	defer p.sessionMu.Unlock()
-	seq := p.seqNums[sessionID]
-	p.seqNums[sessionID] = seq + 1
-	return seq
 }
 
 func randomHex(n int) string {
@@ -98,13 +94,32 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set host header
 	proxyReq.Host = upstream
 
-	// Generate session ID and sequence for logging
+	// Determine session ID and sequence for logging
 	var sessionID string
 	var seq int
+	var isNewSession bool
 	if p.logger != nil {
-		sessionID = p.generateSessionID()
-		seq = p.nextSeq(sessionID)
-		p.logger.LogSessionStart(sessionID, provider, upstream)
+		// Use session manager for conversation endpoints if available
+		if p.sessionManager != nil && isConversationEndpoint(path) {
+			var err error
+			sessionID, seq, isNewSession, err = p.sessionManager.GetOrCreateSession(reqBody, provider, upstream)
+			if err != nil {
+				// Fallback to generating a new session
+				sessionID = p.generateSessionID()
+				seq = 1
+				isNewSession = true
+			}
+		} else {
+			// Fallback: generate new session for each request
+			sessionID = p.generateSessionID()
+			seq = 1
+			isNewSession = true
+		}
+
+		// Only log session_start on new sessions (seq == 1)
+		if isNewSession {
+			p.logger.LogSessionStart(sessionID, provider, upstream)
+		}
 		p.logger.LogRequest(sessionID, provider, seq, r.Method, path, r.Header, reqBody)
 	}
 
@@ -118,7 +133,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Handle streaming vs non-streaming responses
 	if isStreamingResponse(resp) {
-		streamResponse(w, resp, p.logger, nil, sessionID, provider, seq, startTime, reqBody)
+		streamResponse(w, resp, p.logger, p.sessionManager, sessionID, provider, seq, startTime, reqBody)
 		return
 	}
 
@@ -136,13 +151,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Record total time
 	totalTime := time.Since(startTime)
 
-	// Log response
+	// Log response and record fingerprint for session tracking
 	if p.logger != nil {
 		timing := ResponseTiming{
 			TTFBMs:  ttfb.Milliseconds(),
 			TotalMs: totalTime.Milliseconds(),
 		}
 		p.logger.LogResponse(sessionID, provider, seq, resp.StatusCode, resp.Header, respBody, nil, timing)
+
+		// Record fingerprint for continuation tracking (conversation endpoints only)
+		if p.sessionManager != nil && isConversationEndpoint(path) {
+			p.sessionManager.RecordResponse(sessionID, seq, reqBody, respBody, provider)
+		}
 	}
 
 	// Copy response headers
@@ -167,4 +187,10 @@ func copyHeaders(dst, src http.Header) {
 // Uses strings.HasPrefix for safety (avoids panics on short strings).
 func isLocalhost(host string) bool {
 	return strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "localhost")
+}
+
+// isConversationEndpoint returns true for API endpoints that represent conversations
+// (i.e., have messages that can be tracked for session continuity)
+func isConversationEndpoint(path string) bool {
+	return path == "/v1/messages" || path == "/v1/chat/completions"
 }

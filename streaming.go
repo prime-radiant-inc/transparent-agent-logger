@@ -162,8 +162,33 @@ func streamResponse(w http.ResponseWriter, resp *http.Response, logger *Logger, 
 		logger.LogResponse(sessionID, provider, seq, resp.StatusCode, resp.Header, nil, sw.chunks, timing)
 	}
 
-	// Future: Update session fingerprint with accumulated response text (Task 18)
-	// SessionManager integration will be completed in Task 17
+	// Record fingerprint for session continuation tracking
+	if sm != nil && sw.AccumulatedText() != "" {
+		// Build a synthetic response body for fingerprinting
+		// The accumulated text is the assistant's complete response
+		syntheticResponse := buildSyntheticResponse(sw.AccumulatedText(), provider)
+		sm.RecordResponse(sessionID, seq, reqBody, syntheticResponse, provider)
+	}
 
 	return nil
+}
+
+// buildSyntheticResponse creates a response body structure from accumulated streaming text
+func buildSyntheticResponse(text, provider string) []byte {
+	if provider == "anthropic" {
+		return []byte(`{"content":[{"type":"text","text":"` + escapeJSON(text) + `"}]}`)
+	} else if provider == "openai" {
+		return []byte(`{"choices":[{"message":{"role":"assistant","content":"` + escapeJSON(text) + `"}}]}`)
+	}
+	return nil
+}
+
+// escapeJSON escapes special characters for JSON string embedding
+func escapeJSON(s string) string {
+	result := strings.ReplaceAll(s, "\\", "\\\\")
+	result = strings.ReplaceAll(result, "\"", "\\\"")
+	result = strings.ReplaceAll(result, "\n", "\\n")
+	result = strings.ReplaceAll(result, "\r", "\\r")
+	result = strings.ReplaceAll(result, "\t", "\\t")
+	return result
 }
