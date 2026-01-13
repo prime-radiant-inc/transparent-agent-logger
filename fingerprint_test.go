@@ -159,7 +159,7 @@ func TestExtractClientSessionID(t *testing.T) {
 		}
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil, "")
 	if sessionID != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Errorf("Expected session ID '550e8400-e29b-41d4-a716-446655440000', got '%s'", sessionID)
 	}
@@ -175,7 +175,7 @@ func TestExtractClientSessionIDNoMarker(t *testing.T) {
 		}
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil, "")
 	if sessionID != "" {
 		t.Errorf("Expected empty session ID when no marker, got '%s'", sessionID)
 	}
@@ -188,7 +188,7 @@ func TestExtractClientSessionIDNoMetadata(t *testing.T) {
 		"messages": [{"role": "user", "content": "hello"}]
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil, "")
 	if sessionID != "" {
 		t.Errorf("Expected empty session ID when no metadata, got '%s'", sessionID)
 	}
@@ -202,7 +202,7 @@ func TestExtractClientSessionIDOpenAIChatCompletionsUser(t *testing.T) {
 		"user": "user-12345"
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", nil, "/v1/chat/completions")
 	if sessionID != "user-12345" {
 		t.Errorf("Expected session ID 'user-12345', got '%s'", sessionID)
 	}
@@ -217,7 +217,7 @@ func TestExtractClientSessionIDOpenAIMetadata(t *testing.T) {
 		"metadata": {"session_id": "sess-abc-789"}
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", nil, "/v1/chat/completions")
 	if sessionID != "sess-abc-789" {
 		t.Errorf("Expected session ID 'sess-abc-789', got '%s'", sessionID)
 	}
@@ -232,7 +232,7 @@ func TestExtractClientSessionIDOpenAIResponsesConversation(t *testing.T) {
 		"metadata": {"session_id": "other-session"}
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", nil, "/v1/responses")
 	if sessionID != "conv_abc123" {
 		t.Errorf("Expected session ID 'conv_abc123', got '%s'", sessionID)
 	}
@@ -246,7 +246,7 @@ func TestExtractClientSessionIDOpenAIPreviousResponseID(t *testing.T) {
 		"previous_response_id": "resp_xyz789"
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", nil, "/v1/responses")
 	if sessionID != "resp_xyz789" {
 		t.Errorf("Expected session ID 'resp_xyz789', got '%s'", sessionID)
 	}
@@ -259,7 +259,7 @@ func TestExtractClientSessionIDOpenAINoSession(t *testing.T) {
 		"messages": [{"role": "user", "content": "hello"}]
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", nil, "/v1/chat/completions")
 	if sessionID != "" {
 		t.Errorf("Expected empty session ID, got '%s'", sessionID)
 	}
@@ -275,7 +275,7 @@ func TestExtractClientSessionIDInvalidChars(t *testing.T) {
 		}
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil, "")
 	if sessionID != "" {
 		t.Errorf("Expected empty session ID for invalid chars, got '%s'", sessionID)
 	}
@@ -291,7 +291,7 @@ func TestExtractClientSessionIDMultipleMarkers(t *testing.T) {
 		}
 	}`
 
-	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil)
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic", nil, "")
 	if sessionID != "final-uuid-123" {
 		t.Errorf("Expected session ID 'final-uuid-123', got '%s'", sessionID)
 	}
@@ -331,7 +331,7 @@ func TestExtractClientSessionIDOpenAIHeaders(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("X-Session-ID", "header-session-123")
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", headers)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", headers, "/v1/chat/completions")
 	if sessionID != "header-session-123" {
 		t.Errorf("Expected session ID 'header-session-123', got '%s'", sessionID)
 	}
@@ -347,7 +347,7 @@ func TestExtractClientSessionIDOpenAIClientRequestId(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("X-Client-Request-Id", "client-req-456")
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", headers)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", headers, "/v1/chat/completions")
 	if sessionID != "client-req-456" {
 		t.Errorf("Expected session ID 'client-req-456', got '%s'", sessionID)
 	}
@@ -364,7 +364,7 @@ func TestExtractClientSessionIDOpenAIBodyOverHeader(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("X-Session-ID", "header-session")
 
-	sessionID := ExtractClientSessionID([]byte(request), "openai", headers)
+	sessionID := ExtractClientSessionID([]byte(request), "openai", headers, "/v1/chat/completions")
 	if sessionID != "body-session" {
 		t.Errorf("Expected session ID 'body-session' (body priority), got '%s'", sessionID)
 	}
@@ -380,9 +380,56 @@ func TestExtractClientSessionIDAnthropicIgnoresHeaders(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("X-Session-ID", "header-session")
 
-	sessionID := ExtractClientSessionID([]byte(request), "anthropic", headers)
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic", headers, "")
 	if sessionID != "" {
 		t.Errorf("Anthropic should ignore headers, got '%s'", sessionID)
+	}
+}
+
+func TestExtractThreadIDFromPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"/v1/threads/thread_abc123/messages", "thread_abc123"},
+		{"/v1/threads/thread_xyz789/runs", "thread_xyz789"},
+		{"/v1/threads/thread_test/runs/run_123/steps", "thread_test"},
+		{"/v1/threads", ""},                           // No thread ID
+		{"/v1/chat/completions", ""},                  // Not threads endpoint
+		{"/v1/threads//messages", ""},                 // Empty thread ID
+		{"/v1/threads/../../etc/passwd/messages", ""}, // Path traversal
+	}
+
+	for _, tt := range tests {
+		got := ExtractThreadIDFromPath(tt.path)
+		if got != tt.expected {
+			t.Errorf("ExtractThreadIDFromPath(%q) = %q, want %q", tt.path, got, tt.expected)
+		}
+	}
+}
+
+func TestExtractClientSessionIDOpenAIThreadPath(t *testing.T) {
+	// Empty body - thread ID comes from path
+	request := `{
+		"model": "gpt-4o"
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "openai", nil, "/v1/threads/thread_abc123/messages")
+	if sessionID != "thread_abc123" {
+		t.Errorf("Expected session ID 'thread_abc123', got '%s'", sessionID)
+	}
+}
+
+func TestExtractClientSessionIDOpenAIThreadPathPriority(t *testing.T) {
+	// Thread ID in path takes priority over body fields
+	request := `{
+		"model": "gpt-4o",
+		"user": "other-user"
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "openai", nil, "/v1/threads/thread_xyz/runs")
+	if sessionID != "thread_xyz" {
+		t.Errorf("Expected session ID 'thread_xyz' (path priority), got '%s'", sessionID)
 	}
 }
 

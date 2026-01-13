@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 )
 
 // FingerprintMessages computes a SHA256 hash of canonicalized messages
@@ -149,20 +150,29 @@ func ComputePriorFingerprint(body []byte, provider string) (string, error) {
 }
 
 // ExtractClientSessionID extracts a client-provided session ID from the request.
+// path is the URL path, used for OpenAI Threads API thread ID extraction.
 // For Anthropic, this is found in metadata.user_id with format:
 //
 //	user_<hash>_account_<uuid>_session_<session-uuid>
 //
 // For OpenAI, priority order:
-//  1. conversation (Responses API)
-//  2. previous_response_id (Responses API chaining)
-//  3. metadata.session_id
-//  4. X-Session-ID header
-//  5. X-Client-Request-Id header
-//  6. user field
+//  1. URL path thread ID (Threads API)
+//  2. conversation (Responses API)
+//  3. previous_response_id (Responses API chaining)
+//  4. metadata.session_id
+//  5. X-Session-ID header
+//  6. X-Client-Request-Id header
+//  7. user field
 //
 // Returns empty string if no session ID is found.
-func ExtractClientSessionID(body []byte, provider string, headers http.Header) string {
+func ExtractClientSessionID(body []byte, provider string, headers http.Header, path string) string {
+	if provider == "openai" {
+		// Check URL path first for thread ID (highest priority)
+		if threadID := ExtractThreadIDFromPath(path); threadID != "" {
+			return threadID
+		}
+	}
+
 	var request map[string]interface{}
 	if err := json.Unmarshal(body, &request); err != nil {
 		return ""
@@ -285,6 +295,33 @@ func isValidSessionID(id string) bool {
 		}
 	}
 	return true
+}
+
+// ExtractThreadIDFromPath extracts thread ID from OpenAI Threads API paths
+// Path format: /v1/threads/{thread_id}/messages or /v1/threads/{thread_id}/runs
+// Returns empty string if not a threads endpoint or no valid thread ID
+func ExtractThreadIDFromPath(path string) string {
+	if !strings.HasPrefix(path, "/v1/threads/") {
+		return ""
+	}
+
+	parts := strings.Split(path, "/")
+	// parts: ["", "v1", "threads", "{thread_id}", "messages|runs", ...]
+	if len(parts) < 5 {
+		return ""
+	}
+
+	threadID := parts[3]
+	if threadID == "" {
+		return ""
+	}
+
+	// Validate thread ID
+	if !isValidSessionID(threadID) {
+		return ""
+	}
+
+	return threadID
 }
 
 // ExtractAssistantMessage extracts the assistant's response from API response body

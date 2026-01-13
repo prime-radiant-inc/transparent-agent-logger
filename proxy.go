@@ -103,7 +103,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if shouldLog {
 		if p.sessionManager != nil {
 			var err error
-			sessionID, seq, isNewSession, err = p.sessionManager.GetOrCreateSession(reqBody, provider, upstream, r.Header)
+			sessionID, seq, isNewSession, err = p.sessionManager.GetOrCreateSession(reqBody, provider, upstream, r.Header, path)
 			if err != nil {
 				// Fallback to generating a new session
 				sessionID = p.generateSessionID()
