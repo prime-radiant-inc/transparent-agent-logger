@@ -122,3 +122,40 @@ func TestProxyLogsRequests(t *testing.T) {
 		t.Error("Log should contain response entry")
 	}
 }
+
+func TestIsConversationEndpoint(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		// Anthropic
+		{"/v1/messages", true},
+
+		// OpenAI conversation endpoints
+		{"/v1/chat/completions", true},
+		{"/v1/responses", true},
+		{"/v1/completions", true},
+		{"/v1/threads/thread_abc123/messages", true},
+		{"/v1/threads/thread_abc123/runs", true},
+		{"/v1/threads/thread_abc123/runs/run_xyz/steps", true},
+
+		// Non-conversation endpoints (should NOT log)
+		{"/v1/messages/count_tokens", false},
+		{"/v1/models", false},
+		{"/v1/embeddings", false},
+		{"/v1/images/generations", false},
+		{"/v1/audio/transcriptions", false},
+		{"/v1/files", false},
+		{"/v1/threads", false},       // Creating thread, not a conversation
+		{"/v1/conversations", false}, // CRUD operations only
+		{"/v1/assistants", false},
+		{"/v1/vector_stores", false},
+	}
+
+	for _, tt := range tests {
+		got := isConversationEndpoint(tt.path)
+		if got != tt.expected {
+			t.Errorf("isConversationEndpoint(%q) = %v, want %v", tt.path, got, tt.expected)
+		}
+	}
+}
