@@ -44,7 +44,11 @@ func (p *Proxy) generateSessionID() string {
 
 func randomHex(n int) string {
 	b := make([]byte, n)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to time-based uniqueness if crypto/rand fails
+		// This shouldn't happen on modern systems but handle gracefully
+		return hex.EncodeToString([]byte(time.Now().String())[:n])
+	}
 	return hex.EncodeToString(b)
 }
 

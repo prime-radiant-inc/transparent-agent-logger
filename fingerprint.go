@@ -106,11 +106,13 @@ func ExtractMessages(body []byte, provider string) ([]map[string]interface{}, er
 		return nil, nil
 	}
 
-	messages := make([]map[string]interface{}, len(messagesSlice))
-	for i, m := range messagesSlice {
+	// Build slice, skipping any entries that aren't valid message objects
+	messages := make([]map[string]interface{}, 0, len(messagesSlice))
+	for _, m := range messagesSlice {
 		if msg, ok := m.(map[string]interface{}); ok {
-			messages[i] = msg
+			messages = append(messages, msg)
 		}
+		// Skip non-map entries (e.g., nulls, strings, numbers) to avoid nil slots
 	}
 
 	return messages, nil

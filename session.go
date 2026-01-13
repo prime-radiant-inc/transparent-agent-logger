@@ -178,7 +178,8 @@ func (sm *SessionManager) createForkSession(parentSession string, forkSeq int, p
 		sm.logger.LogFork(sessionID, provider, forkSeq, parentSession)
 	}
 
-	return sessionID, 1, true, nil
+	// Return forkSeq + 1 because the fork file already contains entries up to forkSeq
+	return sessionID, forkSeq + 1, true, nil
 }
 
 func (sm *SessionManager) copyLogToForkPoint(srcPath, dstPath string, forkSeq int) error {

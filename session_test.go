@@ -97,8 +97,10 @@ func TestSessionManagerFork(t *testing.T) {
 	if sessionID3 == sessionID1 {
 		t.Error("Fork should have different session ID")
 	}
-	if seq3 != 1 {
-		t.Errorf("Fork should start at seq 1, got %d", seq3)
+	// Fork at seq 1 means the fork file contains seq 1 entries,
+	// so the next entry should be seq 2 (forkSeq + 1)
+	if seq3 != 2 {
+		t.Errorf("Fork should continue at seq 2 (forkSeq+1), got %d", seq3)
 	}
 }
 

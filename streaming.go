@@ -12,9 +12,13 @@ import (
 
 // isStreamingRequest checks if the request is asking for streaming
 func isStreamingRequest(body []byte) bool {
-	s := string(body)
-	return strings.Contains(s, `"stream":true`) ||
-		strings.Contains(s, `"stream": true`)
+	var req struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	return req.Stream
 }
 
 // isStreamingResponse checks if the response is SSE
@@ -184,11 +188,18 @@ func buildSyntheticResponse(text, provider string) []byte {
 }
 
 // escapeJSON escapes special characters for JSON string embedding
+// Uses json.Marshal to handle all control characters correctly
 func escapeJSON(s string) string {
-	result := strings.ReplaceAll(s, "\\", "\\\\")
-	result = strings.ReplaceAll(result, "\"", "\\\"")
-	result = strings.ReplaceAll(result, "\n", "\\n")
-	result = strings.ReplaceAll(result, "\r", "\\r")
-	result = strings.ReplaceAll(result, "\t", "\\t")
-	return result
+	b, err := json.Marshal(s)
+	if err != nil {
+		// Fallback to basic escaping if marshal fails (shouldn't happen for strings)
+		result := strings.ReplaceAll(s, "\\", "\\\\")
+		result = strings.ReplaceAll(result, "\"", "\\\"")
+		result = strings.ReplaceAll(result, "\n", "\\n")
+		result = strings.ReplaceAll(result, "\r", "\\r")
+		result = strings.ReplaceAll(result, "\t", "\\t")
+		return result
+	}
+	// json.Marshal returns "quoted string", strip the quotes
+	return string(b[1 : len(b)-1])
 }
