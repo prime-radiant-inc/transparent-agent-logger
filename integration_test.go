@@ -94,7 +94,8 @@ func TestProxySessionContinuation(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Second request (continuation with prior messages matching first exchange)
-	body2 := `{"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi there"},{"role":"user","content":"how are you"}]}`
+	// Assistant content must be array format to match what we stored from the response
+	body2 := `{"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":[{"type":"text","text":"hi there"}]},{"role":"user","content":"how are you"}]}`
 	req2 := httptest.NewRequest("POST", "/anthropic/"+upstreamHost+"/v1/messages", strings.NewReader(body2))
 	w2 := httptest.NewRecorder()
 	srv.ServeHTTP(w2, req2)
@@ -116,7 +117,7 @@ func TestProxySessionContinuation(t *testing.T) {
 	}
 }
 
-func TestProxyNonConversationEndpointSkipsSessionManager(t *testing.T) {
+func TestProxyNonConversationEndpointSkipsLogging(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +134,7 @@ func TestProxyNonConversationEndpointSkipsSessionManager(t *testing.T) {
 	}
 	defer srv.Close()
 
-	// Token counting endpoint - not a conversation
+	// Token counting endpoint - not a conversation, should not be logged
 	req := httptest.NewRequest("POST", "/anthropic/"+upstreamHost+"/v1/messages/count_tokens", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
@@ -142,10 +143,10 @@ func TestProxyNonConversationEndpointSkipsSessionManager(t *testing.T) {
 		t.Errorf("Expected 200, got %d", w.Code)
 	}
 
-	// Should still log the request (just not use session manager for fingerprinting)
+	// Should NOT create log files for non-conversation endpoints
 	time.Sleep(50 * time.Millisecond)
 	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
-	if len(logFiles) == 0 {
-		t.Error("Expected log file even for non-conversation endpoints")
+	if len(logFiles) != 0 {
+		t.Errorf("Expected no log files for non-conversation endpoints, got %d", len(logFiles))
 	}
 }

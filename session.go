@@ -44,6 +44,39 @@ func (sm *SessionManager) GetOrCreateSession(body []byte, provider, upstream str
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	// First, check if the client provided a session ID (e.g., Claude Code via metadata.user_id)
+	clientSessionID := ExtractClientSessionID(body, provider)
+	if clientSessionID != "" {
+		return sm.getOrCreateByClientSessionID(clientSessionID, provider, upstream)
+	}
+
+	// Fall back to fingerprint-based session tracking
+	return sm.getOrCreateByFingerprint(body, provider, upstream)
+}
+
+// getOrCreateByClientSessionID handles session tracking when the client provides a session ID
+func (sm *SessionManager) getOrCreateByClientSessionID(clientSessionID, provider, upstream string) (string, int, bool, error) {
+	// Check if we've seen this client session ID before
+	existingSession, err := sm.db.FindByClientSessionID(clientSessionID)
+	if err != nil {
+		return "", 0, false, err
+	}
+
+	if existingSession != "" {
+		// Continue existing session
+		_, _, _, lastSeq, err := sm.db.GetSessionWithClientID(existingSession)
+		if err != nil {
+			return "", 0, false, err
+		}
+		return existingSession, lastSeq + 1, false, nil
+	}
+
+	// New client session - create our own session ID but track the client's ID
+	return sm.createNewSessionWithClientID(clientSessionID, provider, upstream)
+}
+
+// getOrCreateByFingerprint handles fingerprint-based session tracking (fallback)
+func (sm *SessionManager) getOrCreateByFingerprint(body []byte, provider, upstream string) (string, int, bool, error) {
 	// Compute fingerprint of prior messages (conversation state before this turn)
 	priorFP, err := ComputePriorFingerprint(body, provider)
 	if err != nil {
@@ -94,6 +127,24 @@ func (sm *SessionManager) createNewSession(provider, upstream string) (string, i
 
 	// Create session in DB
 	if err := sm.db.CreateSession(sessionID, provider, upstream, filePath); err != nil {
+		return "", 0, false, err
+	}
+
+	return sessionID, 1, true, nil
+}
+
+func (sm *SessionManager) createNewSessionWithClientID(clientSessionID, provider, upstream string) (string, int, bool, error) {
+	sessionID := generateSessionID()
+	filePath := filepath.Join(provider, sessionID+".jsonl")
+
+	// Create provider directory
+	providerDir := filepath.Join(sm.baseDir, provider)
+	if err := os.MkdirAll(providerDir, 0755); err != nil {
+		return "", 0, false, err
+	}
+
+	// Create session in DB with client session ID
+	if err := sm.db.CreateSessionWithClientID(sessionID, clientSessionID, provider, upstream, filePath); err != nil {
 		return "", 0, false, err
 	}
 

@@ -29,7 +29,8 @@ func NewSessionDB(path string) (*SessionDB, error) {
 		last_activity TEXT NOT NULL,
 		last_seq INTEGER NOT NULL DEFAULT 0,
 		last_fingerprint TEXT NOT NULL DEFAULT '',
-		file_path TEXT NOT NULL
+		file_path TEXT NOT NULL,
+		client_session_id TEXT
 	);
 
 	CREATE TABLE IF NOT EXISTS fingerprints (
@@ -41,12 +42,24 @@ func NewSessionDB(path string) (*SessionDB, error) {
 
 	CREATE INDEX IF NOT EXISTS idx_fingerprints_session ON fingerprints(session_id);
 	CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider);
+	CREATE INDEX IF NOT EXISTS idx_sessions_client_id ON sessions(client_session_id);
+	`
+
+	// Migration: add client_session_id column if it doesn't exist
+	migration := `
+	ALTER TABLE sessions ADD COLUMN client_session_id TEXT;
 	`
 
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create schema: %w", err)
 	}
+
+	// Run migration (ignore error if column already exists)
+	db.Exec(migration)
+
+	// Create index for client_session_id (may already exist from schema)
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_client_id ON sessions(client_session_id)")
 
 	return &SessionDB{db: db}, nil
 }
@@ -118,5 +131,40 @@ func (s *SessionDB) GetSession(id string) (provider, upstream, filePath string, 
 	`, id)
 
 	err = row.Scan(&provider, &upstream, &filePath)
+	return
+}
+
+// CreateSessionWithClientID creates a new session with a client-provided session ID
+func (s *SessionDB) CreateSessionWithClientID(id, clientSessionID, provider, upstream, filePath string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	_, err := s.db.Exec(`
+		INSERT INTO sessions (id, client_session_id, provider, upstream, created_at, last_activity, file_path)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, id, clientSessionID, provider, upstream, now, now, filePath)
+
+	return err
+}
+
+// FindByClientSessionID finds a session by its client-provided session ID
+func (s *SessionDB) FindByClientSessionID(clientSessionID string) (sessionID string, err error) {
+	row := s.db.QueryRow(`
+		SELECT id FROM sessions WHERE client_session_id = ?
+	`, clientSessionID)
+
+	err = row.Scan(&sessionID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return sessionID, err
+}
+
+// GetSessionWithClientID gets a session including its client session ID and last sequence
+func (s *SessionDB) GetSessionWithClientID(id string) (provider, upstream, filePath string, lastSeq int, err error) {
+	row := s.db.QueryRow(`
+		SELECT provider, upstream, file_path, last_seq FROM sessions WHERE id = ?
+	`, id)
+
+	err = row.Scan(&provider, &upstream, &filePath, &lastSeq)
 	return
 }

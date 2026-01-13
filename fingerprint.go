@@ -37,6 +37,11 @@ func canonicalizeMessages(messages []map[string]interface{}) []map[string]interf
 	return result
 }
 
+// Keys to exclude from fingerprinting (metadata that doesn't affect semantic content)
+var fingerprintExcludeKeys = map[string]bool{
+	"cache_control": true, // Claude Code adds this to follow-up requests
+}
+
 func canonicalizeMap(m map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 
@@ -48,6 +53,10 @@ func canonicalizeMap(m map[string]interface{}) map[string]interface{} {
 	sort.Strings(keys)
 
 	for _, k := range keys {
+		// Skip keys that don't affect semantic content
+		if fingerprintExcludeKeys[k] {
+			continue
+		}
 		v := m[k]
 		switch val := v.(type) {
 		case map[string]interface{}:
@@ -138,7 +147,80 @@ func ComputePriorFingerprint(body []byte, provider string) (string, error) {
 	return FingerprintMessages(priorJSON), nil
 }
 
+// ExtractClientSessionID extracts a client-provided session ID from the request body.
+// For Anthropic, this is found in metadata.user_id with format:
+//
+//	user_<hash>_account_<uuid>_session_<session-uuid>
+//
+// Returns empty string if no session ID is found.
+func ExtractClientSessionID(body []byte, provider string) string {
+	if provider != "anthropic" {
+		// Only Anthropic metadata.user_id is supported currently
+		return ""
+	}
+
+	var request map[string]interface{}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return ""
+	}
+
+	// Get metadata.user_id
+	metadata, ok := request["metadata"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	userID, ok := metadata["user_id"].(string)
+	if !ok || userID == "" {
+		return ""
+	}
+
+	// Extract session ID from user_id
+	// Format: user_<hash>_account_<uuid>_session_<session-uuid>
+	// We want the part after the last "_session_"
+	const sessionMarker = "_session_"
+	idx := lastIndex(userID, sessionMarker)
+	if idx == -1 {
+		// No session marker found - can't extract session ID
+		return ""
+	}
+
+	sessionID := userID[idx+len(sessionMarker):]
+
+	// Validate session ID: must be non-empty and contain only safe characters
+	if !isValidSessionID(sessionID) {
+		return ""
+	}
+
+	return sessionID
+}
+
+// lastIndex returns the index of the last occurrence of substr in s, or -1 if not found
+func lastIndex(s, substr string) int {
+	for i := len(s) - len(substr); i >= 0; i-- {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
+// isValidSessionID checks if a session ID is safe to use
+// Only allows alphanumeric characters, hyphens, and underscores
+func isValidSessionID(id string) bool {
+	if id == "" || len(id) > 255 {
+		return false
+	}
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // ExtractAssistantMessage extracts the assistant's response from API response body
+// Preserves the original content structure (array for Anthropic) to match follow-up requests
 func ExtractAssistantMessage(responseBody []byte, provider string) (map[string]interface{}, error) {
 	var resp map[string]interface{}
 	if err := json.Unmarshal(responseBody, &resp); err != nil {
@@ -146,19 +228,15 @@ func ExtractAssistantMessage(responseBody []byte, provider string) (map[string]i
 	}
 
 	if provider == "anthropic" {
-		// Anthropic: {"content": [{"type": "text", "text": "..."}], ...}
+		// Anthropic response: {"role": "assistant", "content": [{"type": "text", "text": "..."}], ...}
+		// Preserve content as array to match how Claude Code sends it in follow-up requests
 		content, ok := resp["content"].([]interface{})
 		if !ok || len(content) == 0 {
 			return nil, fmt.Errorf("missing or empty content in response")
 		}
-		block, ok := content[0].(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("invalid content block format")
-		}
-		text, _ := block["text"].(string)
 		return map[string]interface{}{
 			"role":    "assistant",
-			"content": text,
+			"content": content,
 		}, nil
 	} else if provider == "openai" {
 		// OpenAI: {"choices": [{"message": {"role": "assistant", "content": "..."}}]}

@@ -56,6 +56,10 @@ func (l *Logger) getFile(sessionID, provider string) (*os.File, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if l.files == nil {
+		return nil, fmt.Errorf("logger is closed")
+	}
+
 	if f, ok := l.files[key]; ok {
 		return f, nil
 	}

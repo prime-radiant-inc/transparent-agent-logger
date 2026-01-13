@@ -94,13 +94,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set host header
 	proxyReq.Host = upstream
 
-	// Determine session ID and sequence for logging
+	// Determine session ID and sequence for logging (conversation endpoints only)
 	var sessionID string
 	var seq int
 	var isNewSession bool
-	if p.logger != nil {
-		// Use session manager for conversation endpoints if available
-		if p.sessionManager != nil && isConversationEndpoint(path) {
+	shouldLog := p.logger != nil && isConversationEndpoint(path)
+
+	if shouldLog {
+		if p.sessionManager != nil {
 			var err error
 			sessionID, seq, isNewSession, err = p.sessionManager.GetOrCreateSession(reqBody, provider, upstream)
 			if err != nil {
@@ -110,7 +111,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				isNewSession = true
 			}
 		} else {
-			// Fallback: generate new session for each request
+			// No session manager - generate new session for each request
 			sessionID = p.generateSessionID()
 			seq = 1
 			isNewSession = true
@@ -133,7 +134,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Handle streaming vs non-streaming responses
 	if isStreamingResponse(resp) {
-		streamResponse(w, resp, p.logger, p.sessionManager, sessionID, provider, seq, startTime, reqBody)
+		var loggerForStream *Logger
+		var smForStream *SessionManager
+		if shouldLog {
+			loggerForStream = p.logger
+			smForStream = p.sessionManager
+		}
+		streamResponse(w, resp, loggerForStream, smForStream, sessionID, provider, seq, startTime, reqBody)
 		return
 	}
 
@@ -151,16 +158,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Record total time
 	totalTime := time.Since(startTime)
 
-	// Log response and record fingerprint for session tracking
-	if p.logger != nil {
+	// Log response and record fingerprint for session tracking (conversation endpoints only)
+	if shouldLog {
 		timing := ResponseTiming{
 			TTFBMs:  ttfb.Milliseconds(),
 			TotalMs: totalTime.Milliseconds(),
 		}
 		p.logger.LogResponse(sessionID, provider, seq, resp.StatusCode, resp.Header, respBody, nil, timing)
 
-		// Record fingerprint for continuation tracking (conversation endpoints only)
-		if p.sessionManager != nil && isConversationEndpoint(path) {
+		// Record fingerprint for continuation tracking
+		if p.sessionManager != nil {
 			p.sessionManager.RecordResponse(sessionID, seq, reqBody, respBody, provider)
 		}
 	}
@@ -192,5 +199,24 @@ func isLocalhost(host string) bool {
 // isConversationEndpoint returns true for API endpoints that represent conversations
 // (i.e., have messages that can be tracked for session continuity)
 func isConversationEndpoint(path string) bool {
-	return path == "/v1/messages" || path == "/v1/chat/completions"
+	// Anthropic
+	if path == "/v1/messages" {
+		return true
+	}
+
+	// OpenAI Chat/Completions
+	if path == "/v1/chat/completions" || path == "/v1/completions" || path == "/v1/responses" {
+		return true
+	}
+
+	// OpenAI Threads API - matches /v1/threads/{id}/messages or /v1/threads/{id}/runs[/...]
+	if strings.HasPrefix(path, "/v1/threads/") {
+		parts := strings.Split(path, "/")
+		// /v1/threads/{id}/messages or /v1/threads/{id}/runs
+		if len(parts) >= 5 && (parts[4] == "messages" || parts[4] == "runs") {
+			return true
+		}
+	}
+
+	return false
 }

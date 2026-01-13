@@ -100,8 +100,21 @@ func TestExtractAssistantMessageAnthropic(t *testing.T) {
 	if msg["role"] != "assistant" {
 		t.Errorf("Expected role 'assistant', got %v", msg["role"])
 	}
-	if msg["content"] != "Hello there!" {
-		t.Errorf("Expected content 'Hello there!', got %v", msg["content"])
+
+	// Content should be preserved as array (to match Claude Code follow-up format)
+	content, ok := msg["content"].([]interface{})
+	if !ok {
+		t.Fatalf("Expected content to be array, got %T", msg["content"])
+	}
+	if len(content) != 1 {
+		t.Fatalf("Expected 1 content block, got %d", len(content))
+	}
+	block, ok := content[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected content block to be map, got %T", content[0])
+	}
+	if block["text"] != "Hello there!" {
+		t.Errorf("Expected text 'Hello there!', got %v", block["text"])
 	}
 }
 
@@ -134,3 +147,121 @@ func TestExtractAssistantMessageMalformed(t *testing.T) {
 		t.Error("Expected error for missing content")
 	}
 }
+
+func TestExtractClientSessionID(t *testing.T) {
+	// Claude Code format with _session_ marker
+	request := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [{"role": "user", "content": "hello"}],
+		"metadata": {
+			"user_id": "user_abc123_account_def456_session_550e8400-e29b-41d4-a716-446655440000"
+		}
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic")
+	if sessionID != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Errorf("Expected session ID '550e8400-e29b-41d4-a716-446655440000', got '%s'", sessionID)
+	}
+}
+
+func TestExtractClientSessionIDNoMarker(t *testing.T) {
+	// No _session_ marker - should return empty
+	request := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [{"role": "user", "content": "hello"}],
+		"metadata": {
+			"user_id": "user_abc123_account_def456"
+		}
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic")
+	if sessionID != "" {
+		t.Errorf("Expected empty session ID when no marker, got '%s'", sessionID)
+	}
+}
+
+func TestExtractClientSessionIDNoMetadata(t *testing.T) {
+	// No metadata field
+	request := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [{"role": "user", "content": "hello"}]
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic")
+	if sessionID != "" {
+		t.Errorf("Expected empty session ID when no metadata, got '%s'", sessionID)
+	}
+}
+
+func TestExtractClientSessionIDOpenAI(t *testing.T) {
+	// OpenAI provider - not supported, should return empty
+	request := `{
+		"model": "gpt-4",
+		"messages": [{"role": "user", "content": "hello"}],
+		"metadata": {
+			"user_id": "user_abc_session_12345"
+		}
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "openai")
+	if sessionID != "" {
+		t.Errorf("Expected empty session ID for OpenAI provider, got '%s'", sessionID)
+	}
+}
+
+func TestExtractClientSessionIDInvalidChars(t *testing.T) {
+	// Session ID with invalid characters (path traversal attempt)
+	request := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [{"role": "user", "content": "hello"}],
+		"metadata": {
+			"user_id": "user_abc_session_../../../etc/passwd"
+		}
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic")
+	if sessionID != "" {
+		t.Errorf("Expected empty session ID for invalid chars, got '%s'", sessionID)
+	}
+}
+
+func TestExtractClientSessionIDMultipleMarkers(t *testing.T) {
+	// Multiple _session_ markers - should use the last one
+	request := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [{"role": "user", "content": "hello"}],
+		"metadata": {
+			"user_id": "user_session_old_session_new_session_final-uuid-123"
+		}
+	}`
+
+	sessionID := ExtractClientSessionID([]byte(request), "anthropic")
+	if sessionID != "final-uuid-123" {
+		t.Errorf("Expected session ID 'final-uuid-123', got '%s'", sessionID)
+	}
+}
+
+func TestIsValidSessionID(t *testing.T) {
+	tests := []struct {
+		id    string
+		valid bool
+	}{
+		{"550e8400-e29b-41d4-a716-446655440000", true},
+		{"abc123", true},
+		{"ABC-123_xyz", true},
+		{"", false},
+		{"../etc/passwd", false},
+		{"foo@bar", false},
+		{"foo$bar", false},
+		{"foo bar", false},
+		{string(make([]byte, 256)), false}, // too long
+	}
+
+	for _, tt := range tests {
+		got := isValidSessionID(tt.id)
+		if got != tt.valid {
+			t.Errorf("isValidSessionID(%q) = %v, want %v", tt.id, got, tt.valid)
+		}
+	}
+}
+
