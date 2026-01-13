@@ -350,8 +350,117 @@ After fixing, tasks must be reordered:
 1. `fingerprint.go` - Add `ExtractAssistantMessage`
 2. `session.go` - Fix `RecordResponse`, `copyLogToForkPoint`, add logger field
 3. `session_test.go` - Fix tests to include response bodies
-4. `streaming.go` - Fix string functions, add text accumulation
-5. `proxy.go` - Fix `isLocalhost`, pass response to `RecordResponse`
+4. `streaming.go` - Fix string functions, add text accumulation, add sessionManager param
+5. `proxy.go` - Fix `isLocalhost`, pass response to `RecordResponse`, update streamResponse call
 6. `logger.go` - Add `LogFork`
 7. `main.go` - Add graceful shutdown
 8. `server.go` - Pass logger to SessionManager
+
+---
+
+## Additional Issues (from code review)
+
+### Issue A: TOCTOU Race Condition in Session Manager
+
+Between `GetOrCreateSession` and `RecordResponse` calls, another request could interleave.
+
+**Mitigation:** Document limitation - under high concurrency, may occasionally create extra branches. For v1 this is acceptable. Full fix would require transactional session handles.
+
+### Issue B: streamResponse Missing Parameters
+
+`streamResponse` needs `sessionManager` AND `reqBody` parameters to record fingerprint.
+
+**Fix:**
+```go
+// OLD
+func streamResponse(w http.ResponseWriter, resp *http.Response, logger *Logger, sessionID, provider string, seq int, startTime time.Time) error
+
+// NEW
+func streamResponse(w http.ResponseWriter, resp *http.Response, logger *Logger, sm *SessionManager, sessionID, provider string, seq int, startTime time.Time, reqBody []byte) error
+```
+
+Update call site in proxy.go:
+```go
+if isStreamingResponse(resp) {
+    streamResponse(w, resp, p.logger, p.sessionManager, sessionID, provider, seq, startTime, reqBody)
+    return
+}
+```
+
+### Issue C: OpenAI Streaming Format Different
+
+OpenAI SSE events use `choices[0].delta.content`, not `content_block_delta`.
+
+**Fix:** Add provider-aware delta extraction:
+```go
+func extractDeltaText(data []byte, provider string) string {
+    if provider == "anthropic" && strings.Contains(string(data), "content_block_delta") {
+        // Parse {"delta":{"text":"..."}}
+    } else if provider == "openai" && strings.Contains(string(data), `"delta"`) {
+        // Parse {"choices":[{"delta":{"content":"..."}}]}
+    }
+    return ""
+}
+```
+
+### Issue D: ExtractAssistantMessage Panics on Malformed JSON
+
+**Fix:** Add error handling:
+```go
+func ExtractAssistantMessage(responseBody []byte, provider string) (map[string]interface{}, error) {
+    var resp map[string]interface{}
+    if err := json.Unmarshal(responseBody, &resp); err != nil {
+        return nil, fmt.Errorf("failed to parse response: %w", err)
+    }
+
+    if provider == "anthropic" {
+        content, ok := resp["content"].([]interface{})
+        if !ok || len(content) == 0 {
+            return nil, fmt.Errorf("missing or empty content in response")
+        }
+        block, ok := content[0].(map[string]interface{})
+        if !ok {
+            return nil, fmt.Errorf("invalid content block format")
+        }
+        text, _ := block["text"].(string)
+        return map[string]interface{}{"role": "assistant", "content": text}, nil
+    }
+    // ... similar for openai
+}
+```
+
+### Issue E: Missing Test for Fork Log File Copy
+
+Add test that verifies forked log file contains only entries up to fork point:
+```go
+func TestForkCopiesLogCorrectly(t *testing.T) {
+    tmpDir := t.TempDir()
+    sm, _ := NewSessionManager(tmpDir)
+    logger, _ := NewLogger(tmpDir)
+    defer sm.Close()
+    defer logger.Close()
+
+    // Create session and log entries
+    // ... write seq 1, 2, 3 ...
+
+    // Fork from seq 1
+    // ... trigger fork ...
+
+    // Read forked file
+    // Verify only session_start + seq 1 entries exist
+}
+```
+
+---
+
+## Complete Task Dependency Order
+
+After all fixes:
+1. Task 10 (logger.go) - Add `LogFork` method
+2. Task 16 (fingerprint.go) - Add `ExtractAssistantMessage` with error handling
+3. Task 13 (streaming.go) - Fix string functions, add text accumulation, add `extractDeltaText`, update signature
+4. Task 17 (session.go) - Fix `RecordResponse` signature, fix `copyLogToForkPoint`, add logger field
+5. Task 17 (session_test.go) - Fix all tests with response bodies, add fork file copy test
+6. Task 18 (proxy.go) - Fix `isLocalhost`, update `streamResponse` call with new params, pass response to `RecordResponse`
+7. Task 4 (main.go) - Add graceful shutdown
+8. Task 18 (server.go) - Pass logger to SessionManager
