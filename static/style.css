@@ -98,6 +98,16 @@ h2, h3 {
     overflow: hidden;
 }
 
+.turn-header {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background: rgba(74, 158, 255, 0.05);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+}
+
 .message {
     padding: 1rem;
 }

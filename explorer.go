@@ -456,12 +456,20 @@ func (e *Explorer) groupAndParseTurns(entries []LogEntry, host string) []ParsedT
 		}
 	}
 
-	// Sort turns by request timestamp
+	// Sort turns by response timestamp (when the turn completed)
+	// This ensures the display timeline always progresses forward
 	sort.Slice(turns, func(i, j int) bool {
-		if turns[i].Request == nil || turns[j].Request == nil {
-			return false
+		// Get effective sort timestamp: response time if available, else request time
+		getTime := func(t ParsedTurn) time.Time {
+			if t.Response != nil {
+				return t.Response.Meta.Timestamp
+			}
+			if t.Request != nil {
+				return t.Request.Meta.Timestamp
+			}
+			return time.Time{}
 		}
-		return turns[i].Request.Meta.Timestamp.Before(turns[j].Request.Meta.Timestamp)
+		return getTime(turns[i]).Before(getTime(turns[j]))
 	})
 
 	return turns

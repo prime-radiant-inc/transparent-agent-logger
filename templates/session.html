@@ -21,15 +21,17 @@
 
         {{range .Turns}}
         <div class="turn">
+            <div class="turn-header">
+                {{if .Response}}<span class="timestamp">{{.Response.Meta.Timestamp.Format "15:04:05.000"}}</span>{{else if .Request}}<span class="timestamp">{{.Request.Meta.Timestamp.Format "15:04:05.000"}}</span>{{end}}
+                <span class="model">{{.ReqParsed.Model}}</span>
+                <span class="seq">#{{.Seq}}</span>
+                {{if .RequestID}}<span class="request-id">{{.RequestID}}</span>{{end}}
+            </div>
             <!-- Request: User messages -->
             {{if .Request}}
             <div class="message user">
                 <div class="meta">
                     <span class="role">User</span>
-                    <span class="timestamp">{{.Request.Meta.Timestamp.Format "15:04:05.000"}}</span>
-                    <span class="model">{{.ReqParsed.Model}}</span>
-                    <span class="seq">#{{.Seq}}</span>
-                    {{if .RequestID}}<span class="request-id">{{.RequestID}}</span>{{end}}
                 </div>
 
                 {{if .ReqParsed.System}}
@@ -93,7 +95,6 @@
             <div class="message assistant">
                 <div class="meta">
                     <span class="role">Assistant</span>
-                    <span class="timestamp">{{.Response.Meta.Timestamp.Format "15:04:05.000"}}</span>
                     {{if .RespParsed.Usage.OutputTokens}}
                     <span class="tokens">{{.RespParsed.Usage.InputTokens}} in / {{.RespParsed.Usage.OutputTokens}} out</span>
                     {{end}}
