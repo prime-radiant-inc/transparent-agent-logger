@@ -85,6 +85,22 @@ export ANTHROPIC_BASE_URL=http://localhost:8080/anthropic/api.anthropic.com
 export OPENAI_BASE_URL=http://localhost:8080/openai/api.openai.com
 ```
 
+## Log Explorer
+
+Browse and search your LLM logs with a web UI:
+
+```bash
+llm-proxy --explore              # Opens browser to http://localhost:8080
+llm-proxy --explore --explore-port 9000  # Use specific port
+```
+
+Features:
+- Session list grouped by date with message counts
+- Filter by provider (Anthropic, OpenAI, etc.)
+- Conversation view with thinking blocks and tool calls
+- Full-text search across all logs
+- Raw JSON view for debugging
+
 ## Uninstall
 
 ```bash

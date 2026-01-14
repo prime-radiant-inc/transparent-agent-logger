@@ -406,3 +406,32 @@ func TestSearchFindsMatchingContent(t *testing.T) {
 		t.Error("Did not expect hello-session in results")
 	}
 }
+
+func TestHomeFiltersByHost(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create sessions for two different hosts
+	dir1 := filepath.Join(tmpDir, "api.anthropic.com", "2026-01-14")
+	dir2 := filepath.Join(tmpDir, "api.openai.com", "2026-01-14")
+	os.MkdirAll(dir1, 0755)
+	os.MkdirAll(dir2, 0755)
+
+	os.WriteFile(filepath.Join(dir1, "anthropic-session.jsonl"), []byte(`{"type":"session_start"}`), 0644)
+	os.WriteFile(filepath.Join(dir2, "openai-session.jsonl"), []byte(`{"type":"session_start"}`), 0644)
+
+	explorer := NewExplorer(tmpDir)
+
+	// Request with filter
+	req := httptest.NewRequest("GET", "/?host=api.anthropic.com", nil)
+	w := httptest.NewRecorder()
+
+	explorer.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "anthropic-session") {
+		t.Error("Expected filtered results to include anthropic session")
+	}
+	if strings.Contains(body, "openai-session") {
+		t.Error("Expected filtered results to exclude openai session")
+	}
+}
