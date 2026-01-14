@@ -22,6 +22,7 @@ type CLIFlags struct {
 	SetupShell  bool
 	Env         bool
 	Setup       bool
+	Uninstall   bool
 }
 
 func ParseCLIFlags(args []string) (CLIFlags, error) {
@@ -35,6 +36,7 @@ func ParseCLIFlags(args []string) (CLIFlags, error) {
 	fs.BoolVar(&flags.SetupShell, "setup-shell", false, "Configure shell integration and exit")
 	fs.BoolVar(&flags.Env, "env", false, "Output environment variables for shell eval and exit")
 	fs.BoolVar(&flags.Setup, "setup", false, "Full setup: install systemd service, enable, start, and configure shell")
+	fs.BoolVar(&flags.Uninstall, "uninstall", false, "Uninstall: stop service, remove service file, remove shell patches, remove portfile")
 
 	if err := fs.Parse(args); err != nil {
 		return CLIFlags{}, err
@@ -62,6 +64,9 @@ func MergeConfig(cfg Config, flags CLIFlags) Config {
 	if flags.Setup {
 		cfg.Setup = true
 	}
+	if flags.Uninstall {
+		cfg.Uninstall = true
+	}
 	return cfg
 }
 
@@ -79,6 +84,14 @@ func main() {
 	}
 
 	cfg = MergeConfig(cfg, flags)
+
+	// Handle --uninstall: remove installation
+	if cfg.Uninstall {
+		if err := Uninstall(); err != nil {
+			log.Fatalf("Uninstall failed: %v", err)
+		}
+		os.Exit(0)
+	}
 
 	// Handle --env: output environment variables for shell eval and exit
 	if cfg.Env {

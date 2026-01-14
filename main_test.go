@@ -59,3 +59,16 @@ func TestParseCLIFlagsSetup(t *testing.T) {
 		t.Error("expected Setup flag to be true")
 	}
 }
+
+func TestParseCLIFlagsUninstall(t *testing.T) {
+	args := []string{"--uninstall"}
+
+	flags, err := ParseCLIFlags(args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !flags.Uninstall {
+		t.Error("expected Uninstall flag to be true")
+	}
+}

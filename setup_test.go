@@ -188,6 +188,163 @@ func TestInstallSystemdService(t *testing.T) {
 	}
 }
 
+func TestUnpatchShellRC(t *testing.T) {
+	tmpDir := t.TempDir()
+	bashrc := filepath.Join(tmpDir, ".bashrc")
+
+	// Create a patched bashrc
+	content := `# existing content
+# LLM Proxy
+eval "$(llm-proxy --env)"
+# more content
+`
+	os.WriteFile(bashrc, []byte(content), 0644)
+
+	err := UnpatchShellRC(bashrc)
+	if err != nil {
+		t.Fatalf("UnpatchShellRC failed: %v", err)
+	}
+
+	result, _ := os.ReadFile(bashrc)
+	if strings.Contains(string(result), "# LLM Proxy") {
+		t.Error("Marker comment still present")
+	}
+	if strings.Contains(string(result), `eval "$(llm-proxy --env)"`) {
+		t.Error("Eval line still present")
+	}
+	if !strings.Contains(string(result), "# existing content") {
+		t.Error("Clobbered existing content")
+	}
+	if !strings.Contains(string(result), "# more content") {
+		t.Error("Clobbered more content")
+	}
+}
+
+func TestUnpatchShellRCNonExistentFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	bashrc := filepath.Join(tmpDir, ".bashrc")
+
+	// File doesn't exist, should return nil
+	err := UnpatchShellRC(bashrc)
+	if err != nil {
+		t.Fatalf("UnpatchShellRC should not fail on non-existent file: %v", err)
+	}
+}
+
+func TestUnpatchShellRCNoPatchPresent(t *testing.T) {
+	tmpDir := t.TempDir()
+	bashrc := filepath.Join(tmpDir, ".bashrc")
+
+	// Create a file without the patch
+	content := "# just some content\nalias ls='ls -la'\n"
+	os.WriteFile(bashrc, []byte(content), 0644)
+
+	err := UnpatchShellRC(bashrc)
+	if err != nil {
+		t.Fatalf("UnpatchShellRC failed: %v", err)
+	}
+
+	result, _ := os.ReadFile(bashrc)
+	if string(result) != content {
+		t.Errorf("Content was modified when it shouldn't have been.\nExpected: %q\nGot: %q", content, string(result))
+	}
+}
+
+func TestUnpatchAllShells(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", originalHome)
+
+	// Create patched rc files
+	bashrc := filepath.Join(tmpDir, ".bashrc")
+	zshrc := filepath.Join(tmpDir, ".zshrc")
+
+	bashContent := `# bash config
+# LLM Proxy
+eval "$(llm-proxy --env)"
+alias ls='ls -la'
+`
+	zshContent := `# zsh config
+# LLM Proxy
+eval "$(llm-proxy --env)"
+bindkey -v
+`
+	os.WriteFile(bashrc, []byte(bashContent), 0644)
+	os.WriteFile(zshrc, []byte(zshContent), 0644)
+
+	err := UnpatchAllShells()
+	if err != nil {
+		t.Fatalf("UnpatchAllShells failed: %v", err)
+	}
+
+	// Check bashrc was unpatched
+	bashResult, _ := os.ReadFile(bashrc)
+	if strings.Contains(string(bashResult), "# LLM Proxy") {
+		t.Error("bashrc still has marker")
+	}
+	if strings.Contains(string(bashResult), `eval "$(llm-proxy --env)"`) {
+		t.Error("bashrc still has eval")
+	}
+	if !strings.Contains(string(bashResult), "# bash config") {
+		t.Error("bashrc lost original content")
+	}
+
+	// Check zshrc was unpatched
+	zshResult, _ := os.ReadFile(zshrc)
+	if strings.Contains(string(zshResult), "# LLM Proxy") {
+		t.Error("zshrc still has marker")
+	}
+	if strings.Contains(string(zshResult), `eval "$(llm-proxy --env)"`) {
+		t.Error("zshrc still has eval")
+	}
+	if !strings.Contains(string(zshResult), "# zsh config") {
+		t.Error("zshrc lost original content")
+	}
+}
+
+func TestPatchAndUnpatchRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	bashrc := filepath.Join(tmpDir, ".bashrc")
+
+	// Start with original content
+	original := "# my config\nalias foo='bar'\n"
+	os.WriteFile(bashrc, []byte(original), 0644)
+
+	// Patch
+	err := PatchShellRC(bashrc)
+	if err != nil {
+		t.Fatalf("PatchShellRC failed: %v", err)
+	}
+
+	// Verify patched
+	patched, _ := os.ReadFile(bashrc)
+	if !strings.Contains(string(patched), "# LLM Proxy") {
+		t.Error("Patch didn't add marker")
+	}
+
+	// Unpatch
+	err = UnpatchShellRC(bashrc)
+	if err != nil {
+		t.Fatalf("UnpatchShellRC failed: %v", err)
+	}
+
+	// Verify unpatched - should be back to original (with possible trailing newline differences)
+	unpatched, _ := os.ReadFile(bashrc)
+	if strings.Contains(string(unpatched), "# LLM Proxy") {
+		t.Error("Unpatch didn't remove marker")
+	}
+	if strings.Contains(string(unpatched), `eval "$(llm-proxy --env)"`) {
+		t.Error("Unpatch didn't remove eval")
+	}
+	if !strings.Contains(string(unpatched), "# my config") {
+		t.Error("Original content was lost")
+	}
+	if !strings.Contains(string(unpatched), "alias foo='bar'") {
+		t.Error("Original content was lost")
+	}
+}
+
 func TestFullSetup(t *testing.T) {
 	// This test verifies FullSetup without actually running systemctl
 	// We test the parts we can test (service file creation, shell patching)
