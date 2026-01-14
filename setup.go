@@ -53,3 +53,39 @@ func PatchAllShells() error {
 	}
 	return nil
 }
+
+// GenerateSystemdUnit generates the systemd user service unit file content.
+// The service runs as a user service (systemd --user), restarts on failure,
+// and starts after default.target (login).
+func GenerateSystemdUnit(binaryPath string) string {
+	return fmt.Sprintf(`[Unit]
+Description=LLM API Logging Proxy
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%s --service
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+`, binaryPath)
+}
+
+// SystemdServicePath returns the path for the systemd user service file.
+func SystemdServicePath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "systemd", "user", "llm-proxy.service")
+}
+
+// InstallSystemdService creates the systemd user service file.
+func InstallSystemdService(binaryPath string) error {
+	path := SystemdServicePath()
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	unit := GenerateSystemdUnit(binaryPath)
+	return os.WriteFile(path, []byte(unit), 0644)
+}

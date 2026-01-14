@@ -130,3 +130,60 @@ func TestPatchAllShellsOnlyPatchesExisting(t *testing.T) {
 		t.Error("zshrc was created but shouldn't have been")
 	}
 }
+
+func TestGenerateSystemdUnit(t *testing.T) {
+	unit := GenerateSystemdUnit("/usr/local/bin/llm-proxy")
+
+	if !strings.Contains(unit, "ExecStart=/usr/local/bin/llm-proxy --service") {
+		t.Error("Missing ExecStart")
+	}
+	if !strings.Contains(unit, "[Install]") {
+		t.Error("Missing Install section")
+	}
+	if !strings.Contains(unit, "[Unit]") {
+		t.Error("Missing Unit section")
+	}
+	if !strings.Contains(unit, "[Service]") {
+		t.Error("Missing Service section")
+	}
+	if !strings.Contains(unit, "WantedBy=default.target") {
+		t.Error("Missing WantedBy")
+	}
+}
+
+func TestSystemdServicePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", originalHome)
+
+	path := SystemdServicePath()
+	expected := filepath.Join(tmpDir, ".config", "systemd", "user", "llm-proxy.service")
+	if path != expected {
+		t.Errorf("Expected %s, got %s", expected, path)
+	}
+}
+
+func TestInstallSystemdService(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", originalHome)
+
+	err := InstallSystemdService("/usr/local/bin/llm-proxy")
+	if err != nil {
+		t.Fatalf("InstallSystemdService failed: %v", err)
+	}
+
+	// Check file was created
+	path := SystemdServicePath()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Service file not created: %v", err)
+	}
+
+	// Verify content
+	if !strings.Contains(string(content), "ExecStart=/usr/local/bin/llm-proxy --service") {
+		t.Error("Missing ExecStart in installed service")
+	}
+}
