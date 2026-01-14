@@ -85,3 +85,8 @@ h2, h3 {
     color: var(--text-muted);
     font-size: 0.9rem;
 }
+
+.session .count, .session .time {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"os"
@@ -24,11 +26,15 @@ type Explorer struct {
 }
 
 type SessionInfo struct {
-	ID      string
-	Host    string
-	Date    string
-	Path    string
-	ModTime time.Time
+	ID           string
+	Host         string
+	Date         string
+	Path         string
+	ModTime      time.Time
+	MessageCount int
+	TimeRange    string
+	FirstTime    time.Time
+	LastTime     time.Time
 }
 
 func NewExplorer(logDir string) *Explorer {
@@ -86,13 +92,15 @@ func (e *Explorer) listSessions() []SessionInfo {
 			return nil
 		}
 
-		sessions = append(sessions, SessionInfo{
+		session := SessionInfo{
 			ID:      strings.TrimSuffix(parts[2], ".jsonl"),
 			Host:    parts[0],
 			Date:    parts[1],
 			Path:    path,
 			ModTime: info.ModTime(),
-		})
+		}
+		e.parseSessionMetadata(&session)
+		sessions = append(sessions, session)
 		return nil
 	})
 
@@ -105,6 +113,57 @@ func (e *Explorer) listSessions() []SessionInfo {
 	})
 
 	return sessions
+}
+
+func (e *Explorer) parseSessionMetadata(session *SessionInfo) {
+	data, err := os.ReadFile(session.Path)
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var firstTs, lastTs time.Time
+	msgCount := 0
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		var entry map[string]interface{}
+		if json.Unmarshal([]byte(line), &entry) != nil {
+			continue
+		}
+
+		// Count request entries as messages
+		if entry["type"] == "request" {
+			msgCount++
+		}
+
+		// Extract timestamp from _meta
+		if meta, ok := entry["_meta"].(map[string]interface{}); ok {
+			if tsStr, ok := meta["ts"].(string); ok {
+				if ts, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+					if firstTs.IsZero() || ts.Before(firstTs) {
+						firstTs = ts
+					}
+					if ts.After(lastTs) {
+						lastTs = ts
+					}
+				}
+			}
+		}
+	}
+
+	session.MessageCount = msgCount
+	session.FirstTime = firstTs
+	session.LastTime = lastTs
+
+	if !firstTs.IsZero() && !lastTs.IsZero() {
+		session.TimeRange = fmt.Sprintf("%s - %s",
+			firstTs.Format("15:04"),
+			lastTs.Format("15:04"))
+	}
 }
 
 func (e *Explorer) handleSession(w http.ResponseWriter, r *http.Request) {
