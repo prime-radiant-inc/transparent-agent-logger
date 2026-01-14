@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -198,4 +199,36 @@ func FullSetup() error {
 	}
 
 	return nil
+}
+
+// Status prints the current status of the LLM Proxy.
+// It checks if the proxy is running by reading the portfile and making a health check.
+func Status() {
+	portfile := DefaultPortfilePath()
+	port, err := ReadPortfile(portfile)
+	if err != nil {
+		fmt.Println("Status: NOT RUNNING")
+		fmt.Printf("Portfile: %s (not found)\n", portfile)
+		return
+	}
+
+	// Check if actually responding
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/health", port))
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		fmt.Println("Status: NOT RUNNING (stale portfile)")
+		fmt.Printf("Port: %d\n", port)
+		return
+	}
+	resp.Body.Close()
+
+	home, _ := os.UserHomeDir()
+	logDir := filepath.Join(home, ".llm-provider-logs")
+
+	fmt.Println("Status: RUNNING")
+	fmt.Printf("Port: %d\n", port)
+	fmt.Printf("Logs: %s\n", logDir)
+	fmt.Printf("Portfile: %s\n", portfile)
 }

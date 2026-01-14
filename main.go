@@ -23,6 +23,7 @@ type CLIFlags struct {
 	Env         bool
 	Setup       bool
 	Uninstall   bool
+	Status      bool
 }
 
 func ParseCLIFlags(args []string) (CLIFlags, error) {
@@ -37,6 +38,7 @@ func ParseCLIFlags(args []string) (CLIFlags, error) {
 	fs.BoolVar(&flags.Env, "env", false, "Output environment variables for shell eval and exit")
 	fs.BoolVar(&flags.Setup, "setup", false, "Full setup: install systemd service, enable, start, and configure shell")
 	fs.BoolVar(&flags.Uninstall, "uninstall", false, "Uninstall: stop service, remove service file, remove shell patches, remove portfile")
+	fs.BoolVar(&flags.Status, "status", false, "Show proxy status and exit")
 
 	if err := fs.Parse(args); err != nil {
 		return CLIFlags{}, err
@@ -67,6 +69,9 @@ func MergeConfig(cfg Config, flags CLIFlags) Config {
 	if flags.Uninstall {
 		cfg.Uninstall = true
 	}
+	if flags.Status {
+		cfg.Status = true
+	}
 	return cfg
 }
 
@@ -90,6 +95,12 @@ func main() {
 		if err := Uninstall(); err != nil {
 			log.Fatalf("Uninstall failed: %v", err)
 		}
+		os.Exit(0)
+	}
+
+	// Handle --status: show proxy status and exit
+	if cfg.Status {
+		Status()
 		os.Exit(0)
 	}
 

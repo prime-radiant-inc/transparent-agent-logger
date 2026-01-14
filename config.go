@@ -16,6 +16,7 @@ type Config struct {
 	Env         bool   `toml:"-"` // CLI-only, not persisted in config file
 	Setup       bool   `toml:"-"` // CLI-only, not persisted in config file
 	Uninstall   bool   `toml:"-"` // CLI-only, not persisted in config file
+	Status      bool   `toml:"-"` // CLI-only, not persisted in config file
 }
 
 func DefaultConfig() Config {
