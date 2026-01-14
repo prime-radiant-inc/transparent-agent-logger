@@ -19,6 +19,7 @@ type CLIFlags struct {
 	LogDir      string
 	ConfigPath  string
 	ServiceMode bool
+	SetupShell  bool
 }
 
 func ParseCLIFlags(args []string) (CLIFlags, error) {
@@ -29,6 +30,7 @@ func ParseCLIFlags(args []string) (CLIFlags, error) {
 	fs.StringVar(&flags.LogDir, "log-dir", "", "Directory for log files")
 	fs.StringVar(&flags.ConfigPath, "config", "", "Path to config file")
 	fs.BoolVar(&flags.ServiceMode, "service", false, "Run as background service (dynamic port, write portfile)")
+	fs.BoolVar(&flags.SetupShell, "setup-shell", false, "Configure shell integration and exit")
 
 	if err := fs.Parse(args); err != nil {
 		return CLIFlags{}, err
@@ -47,6 +49,9 @@ func MergeConfig(cfg Config, flags CLIFlags) Config {
 	if flags.ServiceMode {
 		cfg.ServiceMode = true
 	}
+	if flags.SetupShell {
+		cfg.SetupShell = true
+	}
 	return cfg
 }
 
@@ -64,6 +69,19 @@ func main() {
 	}
 
 	cfg = MergeConfig(cfg, flags)
+
+	// Handle --setup-shell: configure shell integration and exit
+	if cfg.SetupShell {
+		if err := WriteEnvScript(); err != nil {
+			log.Fatalf("Failed to write env script: %v", err)
+		}
+		if err := PatchAllShells(); err != nil {
+			log.Fatalf("Failed to patch shell rc: %v", err)
+		}
+		fmt.Println("Shell configuration complete.")
+		fmt.Printf("Restart your shell or run: source %s\n", EnvScriptPath())
+		os.Exit(0)
+	}
 
 	// Service mode overrides: use dynamic port and default log dir
 	if cfg.ServiceMode {
