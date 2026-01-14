@@ -368,3 +368,41 @@ func TestSessionRendersToolCalls(t *testing.T) {
 		t.Error("Expected tool result to be displayed")
 	}
 }
+
+func TestSearchFindsMatchingContent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sessionDir := filepath.Join(tmpDir, "api.anthropic.com", "2026-01-14")
+	os.MkdirAll(sessionDir, 0755)
+
+	content := `{"type":"session_start","_meta":{"ts":"2026-01-14T10:00:00Z"}}
+{"type":"request","body":"{\"messages\":[{\"content\":\"Tell me about quantum computing\"}]}","_meta":{"ts":"2026-01-14T10:00:01Z"}}
+{"type":"response","body":"{\"content\":[{\"text\":\"Quantum computing uses qubits...\"}]}","_meta":{"ts":"2026-01-14T10:00:02Z"}}
+`
+	os.WriteFile(filepath.Join(sessionDir, "quantum-session.jsonl"), []byte(content), 0644)
+
+	// Another session without the search term
+	content2 := `{"type":"session_start","_meta":{"ts":"2026-01-14T11:00:00Z"}}
+{"type":"request","body":"{\"messages\":[{\"content\":\"Hello world\"}]}","_meta":{"ts":"2026-01-14T11:00:01Z"}}
+`
+	os.WriteFile(filepath.Join(sessionDir, "hello-session.jsonl"), []byte(content2), 0644)
+
+	explorer := NewExplorer(tmpDir)
+
+	req := httptest.NewRequest("GET", "/search?q=quantum", nil)
+	w := httptest.NewRecorder()
+
+	explorer.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "quantum-session") {
+		t.Error("Expected search results to include quantum-session")
+	}
+	if strings.Contains(body, "hello-session") {
+		t.Error("Did not expect hello-session in results")
+	}
+}

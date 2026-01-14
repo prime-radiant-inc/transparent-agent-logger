@@ -251,3 +251,45 @@ pre.raw {
     max-height: 300px;
     overflow-y: auto;
 }
+
+.result-count {
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+}
+
+.search-result {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.result-header {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.result-header a {
+    color: var(--accent);
+    font-family: monospace;
+}
+
+.result-header .host, .result-header .date, .result-header .line-num {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.result-context {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.85rem;
+    background: rgba(0,0,0,0.2);
+    padding: 0.75rem;
+    border-radius: 4px;
+    overflow-x: auto;
+}

@@ -59,6 +59,17 @@ type ConversationTurn struct {
 	Response *LogEntry
 }
 
+type SearchResult struct {
+	SessionID  string
+	Host       string
+	Date       string
+	LineNumber int
+	Line       string
+	Context    string
+	MatchStart int
+	MatchEnd   int
+}
+
 type ParsedTurn struct {
 	Seq        int
 	Request    *LogEntry
@@ -366,6 +377,92 @@ func (e *Explorer) groupAndParseTurns(entries []LogEntry, host string) []ParsedT
 }
 
 func (e *Explorer) handleSearch(w http.ResponseWriter, r *http.Request) {
-	// TODO: implement in Task 6
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		e.templates.ExecuteTemplate(w, "search.html", map[string]interface{}{
+			"Query":   "",
+			"Results": nil,
+		})
+		return
+	}
+
+	results := e.search(query, 100)
+
+	e.templates.ExecuteTemplate(w, "search.html", map[string]interface{}{
+		"Query":   query,
+		"Results": results,
+		"Count":   len(results),
+	})
+}
+
+func (e *Explorer) search(query string, limit int) []SearchResult {
+	var results []SearchResult
+	queryLower := strings.ToLower(query)
+
+	filepath.Walk(e.logDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+
+		if len(results) >= limit {
+			return filepath.SkipAll
+		}
+
+		rel, _ := filepath.Rel(e.logDir, path)
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) != 3 {
+			return nil
+		}
+
+		host := parts[0]
+		date := parts[1]
+		sessionID := strings.TrimSuffix(parts[2], ".jsonl")
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		lines := strings.Split(string(data), "\n")
+		for i, line := range lines {
+			if strings.Contains(strings.ToLower(line), queryLower) {
+				matchStart := strings.Index(strings.ToLower(line), queryLower)
+				matchEnd := matchStart + len(query)
+
+				context := line
+				if len(context) > 200 {
+					start := matchStart - 50
+					if start < 0 {
+						start = 0
+					}
+					end := matchStart + len(query) + 150
+					if end > len(line) {
+						end = len(line)
+					}
+					context = "..." + line[start:end] + "..."
+					matchStart = matchStart - start + 3
+					matchEnd = matchStart + len(query)
+				}
+
+				results = append(results, SearchResult{
+					SessionID:  sessionID,
+					Host:       host,
+					Date:       date,
+					LineNumber: i + 1,
+					Line:       line,
+					Context:    context,
+					MatchStart: matchStart,
+					MatchEnd:   matchEnd,
+				})
+
+				if len(results) >= limit {
+					return filepath.SkipAll
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return results
 }

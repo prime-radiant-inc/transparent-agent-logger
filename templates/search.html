@@ -15,7 +15,28 @@
     </nav>
     <main>
         <h2>Search Results</h2>
-        <p>Not yet implemented</p>
+
+        {{if .Query}}
+            {{if .Results}}
+            <p class="result-count">Found {{.Count}} results for "{{.Query}}"</p>
+
+            {{range .Results}}
+            <div class="search-result">
+                <div class="result-header">
+                    <a href="/session/{{.SessionID}}">{{.SessionID}}</a>
+                    <span class="host">{{.Host}}</span>
+                    <span class="date">{{.Date}}</span>
+                    <span class="line-num">Line {{.LineNumber}}</span>
+                </div>
+                <pre class="result-context">{{.Context}}</pre>
+            </div>
+            {{end}}
+            {{else}}
+            <p>No results found for "{{.Query}}"</p>
+            {{end}}
+        {{else}}
+        <p>Enter a search term above.</p>
+        {{end}}
     </main>
 </body>
 </html>
