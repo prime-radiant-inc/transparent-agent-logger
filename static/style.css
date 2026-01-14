@@ -293,3 +293,15 @@ pre.raw {
     border-radius: 4px;
     overflow-x: auto;
 }
+
+.filters {
+    margin-bottom: 1.5rem;
+}
+
+.filters select {
+    padding: 0.5rem;
+    background: var(--bg-secondary);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}

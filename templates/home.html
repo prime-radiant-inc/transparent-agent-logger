@@ -15,6 +15,18 @@
         </form>
     </nav>
     <main>
+        <div class="filters">
+            <form method="get" action="/">
+                <label>Filter by host:</label>
+                <select name="host" onchange="this.form.submit()">
+                    <option value="">All</option>
+                    {{range .Hosts}}
+                    <option value="{{.}}" {{if eq . $.CurrentHost}}selected{{end}}>{{.}}</option>
+                    {{end}}
+                </select>
+            </form>
+        </div>
+
         <h2>Sessions</h2>
         {{if not .Sessions}}
         <p>No sessions found.</p>

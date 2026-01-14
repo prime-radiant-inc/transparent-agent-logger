@@ -9,9 +9,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
+	"time"
 )
 
 type CLIFlags struct {
@@ -83,6 +86,19 @@ func MergeConfig(cfg Config, flags CLIFlags) Config {
 		cfg.ExplorePort = flags.ExplorePort
 	}
 	return cfg
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return
+	}
+	cmd.Start()
 }
 
 func main() {
@@ -174,9 +190,16 @@ func main() {
 
 		explorer := NewExplorer(logDir)
 
-		addr := fmt.Sprintf(":%d", port)
-		log.Printf("Starting LLM Proxy Explorer on http://localhost%s", addr)
+		url := fmt.Sprintf("http://localhost:%d", port)
+		log.Printf("Starting LLM Proxy Explorer on %s", url)
 
+		// Auto-open browser (best effort, don't fail if it doesn't work)
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			openBrowser(url)
+		}()
+
+		addr := fmt.Sprintf(":%d", port)
 		if err := http.ListenAndServe(addr, explorer); err != nil {
 			log.Fatalf("Explorer server error: %v", err)
 		}

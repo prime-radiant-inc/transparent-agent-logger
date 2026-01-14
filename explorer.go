@@ -111,10 +111,35 @@ func (e *Explorer) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	filter := r.URL.Query().Get("host")
 	sessions := e.listSessions()
 
+	// Get unique hosts for filter dropdown
+	hostSet := make(map[string]bool)
+	for _, s := range sessions {
+		hostSet[s.Host] = true
+	}
+	var hosts []string
+	for h := range hostSet {
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+
+	// Apply filter
+	if filter != "" {
+		var filtered []SessionInfo
+		for _, s := range sessions {
+			if s.Host == filter {
+				filtered = append(filtered, s)
+			}
+		}
+		sessions = filtered
+	}
+
 	e.templates.ExecuteTemplate(w, "home.html", map[string]interface{}{
-		"Sessions": sessions,
+		"Sessions":    sessions,
+		"Hosts":       hosts,
+		"CurrentHost": filter,
 	})
 }
 
