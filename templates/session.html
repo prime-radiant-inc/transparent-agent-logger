@@ -26,6 +26,7 @@
             <div class="message user">
                 <div class="meta">
                     <span class="role">User</span>
+                    <span class="timestamp">{{.Request.Meta.Timestamp.Format "15:04:05.000"}}</span>
                     <span class="model">{{.ReqParsed.Model}}</span>
                     <span class="seq">#{{.Seq}}</span>
                     {{if .RequestID}}<span class="request-id">{{.RequestID}}</span>{{end}}
@@ -41,18 +42,42 @@
                 {{range .ReqParsed.Messages}}
                     {{if eq .Role "user"}}
                     <div class="content user-content">
-                        {{if .TextContent}}
-                            <pre class="text">{{.TextContent}}</pre>
-                        {{end}}
                         {{range .Content}}
-                            {{if eq .Type "tool_result"}}
+                            {{if eq .Type "text"}}
+                            <pre class="text">{{.Text}}</pre>
+                            {{else if eq .Type "tool_result"}}
                             <div class="tool-result">
                                 <div class="tool-header">Tool Result ({{.ToolID}})</div>
                                 <pre>{{.Text}}</pre>
                             </div>
                             {{end}}
                         {{end}}
+                        {{/* Fallback for simple string content */}}
+                        {{if and .TextContent (not .Content)}}
+                            <pre class="text">{{.TextContent}}</pre>
+                        {{end}}
                     </div>
+                    {{else if eq .Role "assistant"}}
+                    <details class="history-assistant">
+                        <summary>Previous Assistant Response</summary>
+                        <div class="content assistant-content-history">
+                            {{range .Content}}
+                                {{if eq .Type "thinking"}}
+                                <details class="thinking-block">
+                                    <summary>Thinking...</summary>
+                                    <pre class="thinking">{{.Thinking}}</pre>
+                                </details>
+                                {{else if eq .Type "text"}}
+                                <pre class="text">{{.Text}}</pre>
+                                {{else if eq .Type "tool_use"}}
+                                <div class="tool-call">
+                                    <div class="tool-header">{{.ToolName}}</div>
+                                    <pre class="tool-input">{{printf "%v" .ToolInput}}</pre>
+                                </div>
+                                {{end}}
+                            {{end}}
+                        </div>
+                    </details>
                     {{end}}
                 {{end}}
 
@@ -68,6 +93,7 @@
             <div class="message assistant">
                 <div class="meta">
                     <span class="role">Assistant</span>
+                    <span class="timestamp">{{.Response.Meta.Timestamp.Format "15:04:05.000"}}</span>
                     {{if .RespParsed.Usage.OutputTokens}}
                     <span class="tokens">{{.RespParsed.Usage.InputTokens}} in / {{.RespParsed.Usage.OutputTokens}} out</span>
                     {{end}}

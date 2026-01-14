@@ -142,6 +142,125 @@ func ParseResponseBody(body string, host string) ParsedResponse {
 	return parsed
 }
 
+// ParseStreamingResponse reconstructs a ParsedResponse from SSE chunks
+func ParseStreamingResponse(chunks []StreamChunk) ParsedResponse {
+	parsed := ParsedResponse{}
+
+	// Track content blocks being built
+	var currentBlocks []ContentBlock
+	blockInputBuilders := make(map[int]string) // For building tool input JSON
+	blockTextBuilders := make(map[int]string)  // For building text content
+	blockThinkingBuilders := make(map[int]string) // For building thinking content
+
+	for _, chunk := range chunks {
+		// Parse SSE format: "event: <type>\n" followed by "data: <json>\n"
+		raw := chunk.Raw
+		if strings.HasPrefix(raw, "data: ") {
+			dataStr := strings.TrimPrefix(raw, "data: ")
+			dataStr = strings.TrimSpace(dataStr)
+
+			var data map[string]interface{}
+			if json.Unmarshal([]byte(dataStr), &data) != nil {
+				continue
+			}
+
+			eventType, _ := data["type"].(string)
+
+			switch eventType {
+			case "message_start":
+				// Extract usage from message_start
+				if msg, ok := data["message"].(map[string]interface{}); ok {
+					if usage, ok := msg["usage"].(map[string]interface{}); ok {
+						if in, ok := usage["input_tokens"].(float64); ok {
+							parsed.Usage.InputTokens = int(in)
+						}
+					}
+				}
+
+			case "content_block_start":
+				idx := 0
+				if i, ok := data["index"].(float64); ok {
+					idx = int(i)
+				}
+				// Ensure we have enough blocks
+				for len(currentBlocks) <= idx {
+					currentBlocks = append(currentBlocks, ContentBlock{})
+				}
+				if block, ok := data["content_block"].(map[string]interface{}); ok {
+					if t, ok := block["type"].(string); ok {
+						currentBlocks[idx].Type = t
+					}
+					if id, ok := block["id"].(string); ok {
+						currentBlocks[idx].ToolID = id
+					}
+					if name, ok := block["name"].(string); ok {
+						currentBlocks[idx].ToolName = name
+					}
+				}
+
+			case "content_block_delta":
+				idx := 0
+				if i, ok := data["index"].(float64); ok {
+					idx = int(i)
+				}
+				if delta, ok := data["delta"].(map[string]interface{}); ok {
+					deltaType, _ := delta["type"].(string)
+					switch deltaType {
+					case "text_delta":
+						if text, ok := delta["text"].(string); ok {
+							blockTextBuilders[idx] += text
+						}
+					case "thinking_delta":
+						if thinking, ok := delta["thinking"].(string); ok {
+							blockThinkingBuilders[idx] += thinking
+						}
+					case "input_json_delta":
+						if partial, ok := delta["partial_json"].(string); ok {
+							blockInputBuilders[idx] += partial
+						}
+					}
+				}
+
+			case "content_block_stop":
+				idx := 0
+				if i, ok := data["index"].(float64); ok {
+					idx = int(i)
+				}
+				// Finalize the content block
+				if idx < len(currentBlocks) {
+					if text, ok := blockTextBuilders[idx]; ok && text != "" {
+						currentBlocks[idx].Text = text
+					}
+					if thinking, ok := blockThinkingBuilders[idx]; ok && thinking != "" {
+						currentBlocks[idx].Thinking = thinking
+					}
+					if inputJSON, ok := blockInputBuilders[idx]; ok && inputJSON != "" {
+						var input map[string]interface{}
+						if json.Unmarshal([]byte(inputJSON), &input) == nil {
+							currentBlocks[idx].ToolInput = input
+						}
+					}
+				}
+
+			case "message_delta":
+				if usage, ok := data["usage"].(map[string]interface{}); ok {
+					if out, ok := usage["output_tokens"].(float64); ok {
+						parsed.Usage.OutputTokens = int(out)
+					}
+				}
+				if delta, ok := data["delta"].(map[string]interface{}); ok {
+					if stop, ok := delta["stop_reason"].(string); ok {
+						parsed.StopReason = stop
+					}
+				}
+			}
+		}
+	}
+
+	parsed.Content = currentBlocks
+	return parsed
+}
+
 func parseContentBlock(block map[string]interface{}) ContentBlock {
 	cb := ContentBlock{Raw: block}
 

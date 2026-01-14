@@ -179,7 +179,8 @@ func main() {
 	if cfg.Explore {
 		home, _ := os.UserHomeDir()
 		logDir := cfg.LogDir
-		if logDir == "" || logDir == "./logs" {
+		// Only default to ~/.llm-provider-logs if --log-dir wasn't explicitly set
+		if flags.LogDir == "" {
 			logDir = filepath.Join(home, ".llm-provider-logs")
 		}
 

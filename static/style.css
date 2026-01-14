@@ -314,3 +314,26 @@ pre.raw {
     padding: 0.15rem 0.4rem;
     border-radius: 3px;
 }
+
+.timestamp {
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.history-assistant {
+    background: rgba(100, 100, 100, 0.1);
+    border-left: 3px solid #666;
+    margin: 0.5rem 0;
+    padding: 0.5rem 1rem;
+}
+
+.history-assistant summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.assistant-content-history {
+    margin-top: 0.5rem;
+}

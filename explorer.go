@@ -44,6 +44,7 @@ type LogEntry struct {
 	Headers map[string][]string
 	Status  int
 	Meta    EntryMeta
+	Chunks  []StreamChunk
 	Raw     string // Original JSON line
 }
 
@@ -322,6 +323,25 @@ func (e *Explorer) parseSessionFile(path string) ([]LogEntry, error) {
 			entry.Status = int(s)
 		}
 
+		// Parse streaming chunks
+		if chunks, ok := raw["chunks"].([]interface{}); ok {
+			for _, c := range chunks {
+				if chunk, ok := c.(map[string]interface{}); ok {
+					sc := StreamChunk{}
+					if ts, ok := chunk["ts"].(string); ok {
+						sc.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
+					}
+					if delta, ok := chunk["delta_ms"].(float64); ok {
+						sc.DeltaMs = int64(delta)
+					}
+					if rawData, ok := chunk["raw"].(string); ok {
+						sc.Raw = rawData
+					}
+					entry.Chunks = append(entry.Chunks, sc)
+				}
+			}
+		}
+
 		if meta, ok := raw["_meta"].(map[string]interface{}); ok {
 			if ts, ok := meta["ts"].(string); ok {
 				entry.Meta.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
@@ -375,7 +395,8 @@ func (e *Explorer) groupIntoTurns(entries []LogEntry) []ConversationTurn {
 
 func (e *Explorer) groupAndParseTurns(entries []LogEntry, host string) []ParsedTurn {
 	var turns []ParsedTurn
-	turnMap := make(map[int]*ParsedTurn)
+	turnMapByRequestID := make(map[string]*ParsedTurn) // Key by request_id
+	turnMapBySeq := make(map[int]*ParsedTurn)          // Fallback: key by seq for old logs without request_id
 
 	for i := range entries {
 		entry := &entries[i]
@@ -387,23 +408,61 @@ func (e *Explorer) groupAndParseTurns(entries []LogEntry, host string) []ParsedT
 				Request:   entry,
 				ReqParsed: reqParsed,
 			}
-			turnMap[entry.Seq] = turn
+			if entry.Meta.RequestID != "" {
+				turnMapByRequestID[entry.Meta.RequestID] = turn
+			} else {
+				// Old logs without request_id - use seq as fallback (may have issues with parallel requests)
+				turnMapBySeq[entry.Seq] = turn
+			}
 			turns = append(turns, *turn)
 		} else if entry.Type == "response" {
-			if turn, ok := turnMap[entry.Seq]; ok {
-				turn.Response = entry
-				turn.RespParsed = ParseResponseBody(entry.Body, host)
+			// Match response to request by request_id first, then fall back to seq
+			var matchedTurn *ParsedTurn
+			var matchKey string
+			if entry.Meta.RequestID != "" {
+				if turn, ok := turnMapByRequestID[entry.Meta.RequestID]; ok {
+					matchedTurn = turn
+					matchKey = entry.Meta.RequestID
+				}
+			}
+			if matchedTurn == nil {
+				// Fallback to seq matching for old logs
+				if turn, ok := turnMapBySeq[entry.Seq]; ok {
+					matchedTurn = turn
+					matchKey = fmt.Sprintf("seq:%d", entry.Seq)
+				}
+			}
+
+			if matchedTurn != nil {
+				matchedTurn.Response = entry
+				// Use streaming parser if we have chunks, otherwise parse body
+				if len(entry.Chunks) > 0 {
+					matchedTurn.RespParsed = ParseStreamingResponse(entry.Chunks)
+				} else {
+					matchedTurn.RespParsed = ParseResponseBody(entry.Body, host)
+				}
 				// Update in slice
 				for j := range turns {
-					if turns[j].Seq == entry.Seq {
+					matchesRequestID := turns[j].RequestID != "" && turns[j].RequestID == entry.Meta.RequestID
+					matchesSeq := turns[j].RequestID == "" && turns[j].Seq == entry.Seq
+					if matchesRequestID || matchesSeq {
 						turns[j].Response = entry
-						turns[j].RespParsed = turn.RespParsed
+						turns[j].RespParsed = matchedTurn.RespParsed
 						break
 					}
 				}
+				_ = matchKey // Used for debugging if needed
 			}
 		}
 	}
+
+	// Sort turns by request timestamp
+	sort.Slice(turns, func(i, j int) bool {
+		if turns[i].Request == nil || turns[j].Request == nil {
+			return false
+		}
+		return turns[i].Request.Meta.Timestamp.Before(turns[j].Request.Meta.Timestamp)
+	})
 
 	return turns
 }
