@@ -1,65 +1,104 @@
 # LLM Proxy
 
-A zero-config Go proxy that transparently logs all traffic between AI clients and their providers.
+A transparent logging proxy for LLM API traffic. Install once, and every request to Claude, ChatGPT, or other LLM providers is automatically logged for debugging, auditing, and analysis.
 
-## Quick Start
+## Quick Install
+
+### macOS (Homebrew)
 
 ```bash
-# Run with defaults (port 8080, logs in ./logs)
-./llm-proxy
+brew install obra/tap/llm-proxy
+brew services start llm-proxy
+```
 
-# Configure your client
+### Linux
+
+```bash
+curl -fsSL https://llm-proxy.dev/install.sh | sh
+```
+
+Restart your shell, and you're done. All LLM traffic is now logged.
+
+## What It Does
+
+LLM Proxy sits between your LLM clients (Claude Code, Codex, API scripts) and the provider APIs. It:
+
+- **Logs every request and response** to `~/.llm-provider-logs/`
+- **Auto-configures your shell** so clients use the proxy automatically
+- **Runs as a background service** that starts at login
+- **Works with any client** that uses `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL`
+
+## Log Structure
+
+```
+~/.llm-provider-logs/
+├── api.anthropic.com/
+│   └── 2026-01-14/
+│       └── 20260114-091523-a1b2c3d4.jsonl
+├── api.openai.com/
+│   └── 2026-01-14/
+│       └── 20260114-102234-i9j0k1l2.jsonl
+└── chatgpt.com/
+    └── 2026-01-14/
+        └── 20260114-111448-m3n4o5p6.jsonl
+```
+
+Each session is a JSONL file with request/response pairs, timing information, and metadata.
+
+## Commands
+
+```bash
+llm-proxy --status      # Check if running, show port and log location
+llm-proxy --setup       # Full setup (Linux only: installs systemd service)
+llm-proxy --setup-shell # Configure shell only (adds eval line to .bashrc/.zshrc)
+llm-proxy --uninstall   # Remove service and shell config
+```
+
+## How It Works
+
+1. **Service runs in background** on a dynamic port
+2. **Port is written** to `~/.local/state/llm-proxy/port`
+3. **Shell sources** the eval line: `eval "$(llm-proxy --env)"`
+4. **Environment variables** like `ANTHROPIC_BASE_URL` point to the proxy
+5. **Clients use the proxy** transparently - no client config needed
+
+The `--env` flag checks if the proxy is running and outputs the appropriate exports. If the proxy isn't running, it outputs nothing, so your shell continues to work normally.
+
+## Supported Providers
+
+- **Anthropic** (Claude, Claude Code)
+- **OpenAI** (ChatGPT, Codex, API)
+- Any OpenAI-compatible API
+
+The proxy auto-detects ChatGPT OAuth tokens and routes them to the correct backend.
+
+## Manual Usage
+
+If you prefer not to use the background service:
+
+```bash
+# Run proxy on a specific port
+llm-proxy --port 8080
+
+# Configure clients manually
 export ANTHROPIC_BASE_URL=http://localhost:8080/anthropic/api.anthropic.com
-
-# Use Claude as normal - all traffic is logged
-claude "Hello world"
+export OPENAI_BASE_URL=http://localhost:8080/openai/api.openai.com
 ```
 
-## URL Format
-
-```
-http://localhost:8080/{provider}/{upstream}/{path}
-```
-
-Supported providers:
-- `anthropic` - Anthropic API (Claude)
-- `openai` - OpenAI-compatible APIs
-
-## Configuration
-
-### CLI Flags
+## Uninstall
 
 ```bash
-./llm-proxy --port 9000 --log-dir /var/log/llm-proxy
+# macOS
+brew services stop llm-proxy
+brew uninstall llm-proxy
+llm-proxy --uninstall
+
+# Linux
+llm-proxy --uninstall
+rm /usr/local/bin/llm-proxy  # or ~/.local/bin/llm-proxy
 ```
 
-### Environment Variables
-
-```bash
-LLM_PROXY_PORT=9000
-LLM_PROXY_LOG_DIR=/var/log/llm-proxy
-```
-
-### Config File
-
-```toml
-# config.toml
-port = 9000
-log_dir = "/var/log/llm-proxy"
-```
-
-Precedence: CLI flags > Environment variables > Config file > Defaults
-
-## Log Format
-
-Logs are stored as JSONL files in `{log_dir}/{provider}/{session_id}.jsonl`.
-
-Each file contains:
-- `session_start` - Session metadata
-- `request` - Full request with obfuscated API keys
-- `response` - Full response with timing data
-
-Session tracking detects conversation continuations and forks.
+Logs are preserved in `~/.llm-provider-logs/`. Delete manually if desired.
 
 ## Building
 
@@ -76,3 +115,7 @@ go test -v -short
 # Live E2E tests (requires API key in ~/.amplifier/keys.env)
 go test -v -run TestLive
 ```
+
+## License
+
+MIT
