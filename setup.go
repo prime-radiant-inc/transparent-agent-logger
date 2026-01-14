@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -88,4 +89,39 @@ func InstallSystemdService(binaryPath string) error {
 	}
 	unit := GenerateSystemdUnit(binaryPath)
 	return os.WriteFile(path, []byte(unit), 0644)
+}
+
+// FullSetup performs complete Linux installation:
+// 1. Installs systemd user service
+// 2. Enables and starts the service
+// 3. Patches shell RC files
+func FullSetup() error {
+	// Find our binary path
+	binaryPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	// Install systemd service
+	if err := InstallSystemdService(binaryPath); err != nil {
+		return fmt.Errorf("failed to install service: %w", err)
+	}
+
+	// Enable and start service
+	if err := exec.Command("systemctl", "--user", "daemon-reload").Run(); err != nil {
+		return fmt.Errorf("daemon-reload failed: %w", err)
+	}
+	if err := exec.Command("systemctl", "--user", "enable", "llm-proxy").Run(); err != nil {
+		return fmt.Errorf("enable failed: %w", err)
+	}
+	if err := exec.Command("systemctl", "--user", "start", "llm-proxy").Run(); err != nil {
+		return fmt.Errorf("start failed: %w", err)
+	}
+
+	// Setup shell
+	if err := PatchAllShells(); err != nil {
+		return err
+	}
+
+	return nil
 }

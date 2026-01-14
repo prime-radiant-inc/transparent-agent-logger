@@ -14,6 +14,7 @@ type Config struct {
 	ServiceMode bool   `toml:"-"` // CLI-only, not persisted in config file
 	SetupShell  bool   `toml:"-"` // CLI-only, not persisted in config file
 	Env         bool   `toml:"-"` // CLI-only, not persisted in config file
+	Setup       bool   `toml:"-"` // CLI-only, not persisted in config file
 }
 
 func DefaultConfig() Config {

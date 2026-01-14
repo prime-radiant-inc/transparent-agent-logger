@@ -21,6 +21,7 @@ type CLIFlags struct {
 	ServiceMode bool
 	SetupShell  bool
 	Env         bool
+	Setup       bool
 }
 
 func ParseCLIFlags(args []string) (CLIFlags, error) {
@@ -33,6 +34,7 @@ func ParseCLIFlags(args []string) (CLIFlags, error) {
 	fs.BoolVar(&flags.ServiceMode, "service", false, "Run as background service (dynamic port, write portfile)")
 	fs.BoolVar(&flags.SetupShell, "setup-shell", false, "Configure shell integration and exit")
 	fs.BoolVar(&flags.Env, "env", false, "Output environment variables for shell eval and exit")
+	fs.BoolVar(&flags.Setup, "setup", false, "Full setup: install systemd service, enable, start, and configure shell")
 
 	if err := fs.Parse(args); err != nil {
 		return CLIFlags{}, err
@@ -56,6 +58,9 @@ func MergeConfig(cfg Config, flags CLIFlags) Config {
 	}
 	if flags.Env {
 		cfg.Env = true
+	}
+	if flags.Setup {
+		cfg.Setup = true
 	}
 	return cfg
 }
@@ -107,6 +112,16 @@ func main() {
 			log.Fatalf("Failed to patch shell rc: %v", err)
 		}
 		fmt.Println("Shell configuration complete. Restart your shell to activate.")
+		os.Exit(0)
+	}
+
+	// Handle --setup: full Linux installation
+	if cfg.Setup {
+		if err := FullSetup(); err != nil {
+			log.Fatalf("Setup failed: %v", err)
+		}
+		fmt.Println("LLM Proxy installed and started.")
+		fmt.Println("Restart your shell to activate.")
 		os.Exit(0)
 	}
 

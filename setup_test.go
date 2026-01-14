@@ -187,3 +187,51 @@ func TestInstallSystemdService(t *testing.T) {
 		t.Error("Missing ExecStart in installed service")
 	}
 }
+
+func TestFullSetup(t *testing.T) {
+	// This test verifies FullSetup without actually running systemctl
+	// We test the parts we can test (service file creation, shell patching)
+	// The systemctl commands would fail in test environment anyway
+
+	tmpDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", originalHome)
+
+	// Create shell rc files so they get patched
+	bashrc := filepath.Join(tmpDir, ".bashrc")
+	zshrc := filepath.Join(tmpDir, ".zshrc")
+	os.WriteFile(bashrc, []byte("# bash\n"), 0644)
+	os.WriteFile(zshrc, []byte("# zsh\n"), 0644)
+
+	// Test InstallSystemdService directly (part of FullSetup)
+	binaryPath := "/usr/local/bin/llm-proxy"
+	if err := InstallSystemdService(binaryPath); err != nil {
+		t.Fatalf("InstallSystemdService failed: %v", err)
+	}
+
+	// Verify systemd service file was created
+	servicePath := SystemdServicePath()
+	content, err := os.ReadFile(servicePath)
+	if err != nil {
+		t.Fatalf("Service file not created: %v", err)
+	}
+	if !strings.Contains(string(content), "ExecStart=/usr/local/bin/llm-proxy --service") {
+		t.Error("Service file missing ExecStart")
+	}
+
+	// Test PatchAllShells (part of FullSetup)
+	if err := PatchAllShells(); err != nil {
+		t.Fatalf("PatchAllShells failed: %v", err)
+	}
+
+	// Verify shells were patched
+	bashContent, _ := os.ReadFile(bashrc)
+	if !strings.Contains(string(bashContent), `eval "$(llm-proxy --env)"`) {
+		t.Error("bashrc not patched")
+	}
+	zshContent, _ := os.ReadFile(zshrc)
+	if !strings.Contains(string(zshContent), `eval "$(llm-proxy --env)"`) {
+		t.Error("zshrc not patched")
+	}
+}

@@ -46,3 +46,16 @@ func TestParseCLIFlagsEnv(t *testing.T) {
 		t.Error("expected Env flag to be true")
 	}
 }
+
+func TestParseCLIFlagsSetup(t *testing.T) {
+	args := []string{"--setup"}
+
+	flags, err := ParseCLIFlags(args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !flags.Setup {
+		t.Error("expected Setup flag to be true")
+	}
+}
