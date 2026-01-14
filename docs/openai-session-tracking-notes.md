@@ -116,19 +116,20 @@ Codex CLI (and possibly other clients) use **different endpoints** based on auth
 | API Key (`sk-...`) | `https://api.openai.com/v1` | Standard OpenAI API |
 | ChatGPT OAuth (JWT) | `https://chatgpt.com/backend-api/codex` | ChatGPT backend |
 
-### Proxy Configuration for ChatGPT OAuth
+### Proxy Configuration
 
-When using this proxy with codex CLI OAuth authentication, you need to configure **both** endpoints:
+The proxy **auto-detects** auth type from the `Authorization` header and routes accordingly:
 
 ```bash
-# For API key authentication
+# This is all you need - works for BOTH API key and OAuth
 export OPENAI_BASE_URL=http://localhost:8080/openai/api.openai.com
-
-# For ChatGPT OAuth authentication (in ~/.codex/config.toml)
-chatgpt_base_url = "http://localhost:8080/openai/chatgpt.com/backend-api"
 ```
 
-The proxy URL format `/{provider}/{upstream}/{path}` allows routing to either endpoint.
+The proxy detects:
+- `Bearer sk-...` → routes to `api.openai.com/v1/responses`
+- `Bearer eyJ...` (JWT) → rewrites to `chatgpt.com/backend-api/codex/responses`
+
+No need to configure `chatgpt_base_url` in config.toml.
 
 ### ChatGPT Backend API Detection
 
