@@ -76,7 +76,11 @@ type ParsedTurn struct {
 	Response   *LogEntry
 	ReqParsed  ParsedRequest
 	RespParsed ParsedResponse
-	IsUtility  bool // True for utility requests (e.g., Haiku labeling)
+}
+
+type ModelGroup struct {
+	Model string
+	Turns []ParsedTurn
 }
 
 func NewExplorer(logDir string) *Explorer {
@@ -265,10 +269,13 @@ func (e *Explorer) handleSession(w http.ResponseWriter, r *http.Request) {
 	// Group and parse into conversation turns
 	turns := e.groupAndParseTurns(entries, host)
 
+	// Group turns by model
+	modelGroups := e.groupByModel(turns)
+
 	e.templates.ExecuteTemplate(w, "session.html", map[string]interface{}{
-		"SessionID": sessionID,
-		"Host":      host,
-		"Turns":     turns,
+		"SessionID":   sessionID,
+		"Host":        host,
+		"ModelGroups": modelGroups,
 	})
 }
 
@@ -381,7 +388,6 @@ func (e *Explorer) groupAndParseTurns(entries []LogEntry, host string) []ParsedT
 				Seq:       entry.Seq,
 				Request:   entry,
 				ReqParsed: reqParsed,
-				IsUtility: isUtilityRequest(reqParsed),
 			}
 			turnMap[entry.Seq] = turn
 			turns = append(turns, *turn)
@@ -404,17 +410,32 @@ func (e *Explorer) groupAndParseTurns(entries []LogEntry, host string) []ParsedT
 	return turns
 }
 
-// isUtilityRequest detects auxiliary API calls that aren't part of the main conversation
-// (e.g., Haiku model calls for session labeling)
-func isUtilityRequest(req ParsedRequest) bool {
-	// Haiku labeling requests
-	if strings.Contains(strings.ToLower(req.Model), "haiku") {
-		if strings.Contains(req.System, "new conversation topic") ||
-			strings.Contains(req.System, "isNewTopic") {
-			return true
+// groupByModel groups turns by their requested model, preserving order within each group
+func (e *Explorer) groupByModel(turns []ParsedTurn) []ModelGroup {
+	// Use a map to collect turns by model, and a slice to preserve first-seen order
+	modelMap := make(map[string]*ModelGroup)
+	var modelOrder []string
+
+	for _, turn := range turns {
+		model := turn.ReqParsed.Model
+		if model == "" {
+			model = "unknown"
 		}
+
+		if _, exists := modelMap[model]; !exists {
+			modelMap[model] = &ModelGroup{Model: model}
+			modelOrder = append(modelOrder, model)
+		}
+		modelMap[model].Turns = append(modelMap[model].Turns, turn)
 	}
-	return false
+
+	// Build result in first-seen order
+	var groups []ModelGroup
+	for _, model := range modelOrder {
+		groups = append(groups, *modelMap[model])
+	}
+
+	return groups
 }
 
 func (e *Explorer) handleSearch(w http.ResponseWriter, r *http.Request) {

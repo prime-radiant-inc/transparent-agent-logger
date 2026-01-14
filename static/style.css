@@ -305,3 +305,23 @@ pre.raw {
     border: 1px solid var(--border);
     border-radius: 4px;
 }
+
+.model-group {
+    margin: 2rem 0;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+}
+
+.model-header {
+    color: var(--accent);
+    margin: 0 0 1rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.model-header .turn-count {
+    color: var(--text-muted);
+    font-weight: normal;
+    font-size: 0.9rem;
+}
