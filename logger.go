@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sync"
 	"time"
@@ -24,9 +25,24 @@ type StreamChunk struct {
 
 type Logger struct {
 	baseDir   string
+	machineID string // user@hostname for log aggregation
 	mu        sync.Mutex
 	files     map[string]*os.File
 	upstreams map[string]string // sessionID -> upstream
+}
+
+func getMachineID() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
+	username := "unknown"
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	return username + "@" + hostname
 }
 
 func NewLogger(baseDir string) (*Logger, error) {
@@ -36,6 +52,7 @@ func NewLogger(baseDir string) (*Logger, error) {
 
 	return &Logger{
 		baseDir:   baseDir,
+		machineID: getMachineID(),
 		files:     make(map[string]*os.File),
 		upstreams: make(map[string]string),
 	}, nil
@@ -123,36 +140,55 @@ func (l *Logger) LogSessionStart(sessionID, provider, upstream string) error {
 
 	entry := map[string]interface{}{
 		"type":     "session_start",
-		"ts":       time.Now().UTC().Format(time.RFC3339Nano),
 		"provider": provider,
 		"upstream": upstream,
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+			"machine": l.machineID,
+			"host":    upstream,
+			"session": sessionID,
+		},
 	}
 	return l.writeEntry(sessionID, entry)
 }
 
 func (l *Logger) LogRequest(sessionID, provider string, seq int, method, path string, headers http.Header, body []byte) error {
+	upstream := l.upstreams[sessionID]
+
 	entry := map[string]interface{}{
 		"type":    "request",
-		"ts":      time.Now().UTC().Format(time.RFC3339Nano),
 		"seq":     seq,
 		"method":  method,
 		"path":    path,
 		"headers": ObfuscateHeaders(headers),
 		"body":    string(body),
 		"size":    len(body),
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+			"machine": l.machineID,
+			"host":    upstream,
+			"session": sessionID,
+		},
 	}
 	return l.writeEntry(sessionID, entry)
 }
 
 func (l *Logger) LogResponse(sessionID, provider string, seq int, status int, headers http.Header, body []byte, chunks []StreamChunk, timing ResponseTiming) error {
+	upstream := l.upstreams[sessionID]
+
 	entry := map[string]interface{}{
 		"type":    "response",
-		"ts":      time.Now().UTC().Format(time.RFC3339Nano),
 		"seq":     seq,
 		"status":  status,
 		"headers": headers,
 		"timing":  timing,
 		"size":    len(body),
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+			"machine": l.machineID,
+			"host":    upstream,
+			"session": sessionID,
+		},
 	}
 
 	if chunks != nil {
@@ -166,12 +202,19 @@ func (l *Logger) LogResponse(sessionID, provider string, seq int, status int, he
 
 // LogFork records a fork event when conversation history diverges
 func (l *Logger) LogFork(sessionID, provider string, fromSeq int, parentSession string) error {
+	upstream := l.upstreams[sessionID]
+
 	entry := map[string]interface{}{
 		"type":           "fork",
-		"ts":             time.Now().UTC().Format(time.RFC3339Nano),
 		"from_seq":       fromSeq,
 		"parent_session": parentSession,
 		"reason":         "message_history_diverged",
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+			"machine": l.machineID,
+			"host":    upstream,
+			"session": sessionID,
+		},
 	}
 	return l.writeEntry(sessionID, entry)
 }

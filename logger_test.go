@@ -137,3 +137,53 @@ func TestLoggerResponseWithTiming(t *testing.T) {
 		t.Errorf("TTFB not logged correctly")
 	}
 }
+
+func TestLogEntryHasMeta(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	logger, err := NewLogger(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	sessionID := "test-session-meta"
+	upstream := "api.anthropic.com"
+
+	logger.LogSessionStart(sessionID, "anthropic", upstream)
+	logger.LogRequest(sessionID, "anthropic", 1, "POST", "/v1/messages", nil, []byte(`{}`))
+
+	today := time.Now().Format("2006-01-02")
+	logPath := filepath.Join(tmpDir, upstream, today, sessionID+".jsonl")
+	data, _ := os.ReadFile(logPath)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+
+	// Check request entry has _meta
+	var reqEntry map[string]interface{}
+	json.Unmarshal([]byte(lines[1]), &reqEntry)
+
+	meta, ok := reqEntry["_meta"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected _meta block in log entry")
+	}
+
+	// Verify required fields
+	if _, ok := meta["ts"]; !ok {
+		t.Error("_meta missing ts field")
+	}
+	if _, ok := meta["machine"]; !ok {
+		t.Error("_meta missing machine field")
+	}
+	if _, ok := meta["host"]; !ok {
+		t.Error("_meta missing host field")
+	}
+	if _, ok := meta["session"]; !ok {
+		t.Error("_meta missing session field")
+	}
+
+	// Verify machine format is user@host
+	machine := meta["machine"].(string)
+	if !strings.Contains(machine, "@") {
+		t.Errorf("Expected machine format user@host, got %s", machine)
+	}
+}
