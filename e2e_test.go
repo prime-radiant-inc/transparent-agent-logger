@@ -155,8 +155,9 @@ func TestLiveAnthropicProxyWithLogging(t *testing.T) {
 	// Give logger a moment to flush
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify logs were created
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	// Verify logs were created - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "api.anthropic.com", today, "*.jsonl"))
 	if len(logFiles) == 0 {
 		t.Fatal("No log files created")
 	}
@@ -255,8 +256,9 @@ func TestLiveAnthropicStreamingProxy(t *testing.T) {
 	// Give logger time to flush
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify logs capture chunks
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	// Verify logs capture chunks - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "api.anthropic.com", today, "*.jsonl"))
 	if len(logFiles) == 0 {
 		t.Fatal("No log files created")
 	}
@@ -338,8 +340,9 @@ func TestLiveMultiTurnConversation(t *testing.T) {
 	// Give logger time
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify session tracking worked
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	// Verify session tracking worked - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "api.anthropic.com", today, "*.jsonl"))
 	t.Logf("Created %d log files", len(logFiles))
 
 	// Read and display log contents for debugging

@@ -107,8 +107,9 @@ func TestProxyLogsRequests(t *testing.T) {
 	// Give async logging a moment
 	time.Sleep(50 * time.Millisecond)
 
-	// Check that log file was created
-	files, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	// Check that log file was created - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	files, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(files) == 0 {
 		t.Error("Expected log file to be created")
 	}

@@ -118,11 +118,13 @@ func (sm *SessionManager) getOrCreateByFingerprint(body []byte, provider, upstre
 
 func (sm *SessionManager) createNewSession(provider, upstream string) (string, int, bool, error) {
 	sessionID := generateSessionID()
-	filePath := filepath.Join(provider, sessionID+".jsonl")
+	// New path structure: <upstream>/<YYYY-MM-DD>/<sessionID>.jsonl
+	dateStr := time.Now().Format("2006-01-02")
+	filePath := filepath.Join(upstream, dateStr, sessionID+".jsonl")
 
-	// Create provider directory
-	providerDir := filepath.Join(sm.baseDir, provider)
-	if err := os.MkdirAll(providerDir, 0755); err != nil {
+	// Create directory for upstream/date
+	logDir := filepath.Join(sm.baseDir, upstream, dateStr)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return "", 0, false, err
 	}
 
@@ -136,11 +138,13 @@ func (sm *SessionManager) createNewSession(provider, upstream string) (string, i
 
 func (sm *SessionManager) createNewSessionWithClientID(clientSessionID, provider, upstream string) (string, int, bool, error) {
 	sessionID := generateSessionID()
-	filePath := filepath.Join(provider, sessionID+".jsonl")
+	// New path structure: <upstream>/<YYYY-MM-DD>/<sessionID>.jsonl
+	dateStr := time.Now().Format("2006-01-02")
+	filePath := filepath.Join(upstream, dateStr, sessionID+".jsonl")
 
-	// Create provider directory
-	providerDir := filepath.Join(sm.baseDir, provider)
-	if err := os.MkdirAll(providerDir, 0755); err != nil {
+	// Create directory for upstream/date
+	logDir := filepath.Join(sm.baseDir, upstream, dateStr)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return "", 0, false, err
 	}
 
@@ -155,7 +159,9 @@ func (sm *SessionManager) createNewSessionWithClientID(clientSessionID, provider
 func (sm *SessionManager) createForkSession(parentSession string, forkSeq int, provider, upstream string) (string, int, bool, error) {
 	// Generate new session ID for branch
 	sessionID := generateSessionID()
-	filePath := filepath.Join(provider, sessionID+".jsonl")
+	// New path structure: <upstream>/<YYYY-MM-DD>/<sessionID>.jsonl
+	dateStr := time.Now().Format("2006-01-02")
+	filePath := filepath.Join(upstream, dateStr, sessionID+".jsonl")
 
 	// Get parent session info
 	_, _, parentFile, err := sm.db.GetSession(parentSession)
@@ -173,8 +179,9 @@ func (sm *SessionManager) createForkSession(parentSession string, forkSeq int, p
 		return "", 0, false, err
 	}
 
-	// Log the fork event
+	// Register the upstream with the logger so it can write to the forked session
 	if sm.logger != nil {
+		sm.logger.RegisterUpstream(sessionID, upstream)
 		sm.logger.LogFork(sessionID, provider, forkSeq, parentSession)
 	}
 

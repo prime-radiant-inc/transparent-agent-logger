@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoggerWritesJSONL(t *testing.T) {
@@ -21,9 +22,10 @@ func TestLoggerWritesJSONL(t *testing.T) {
 
 	sessionID := "20260113-102345-a7f3"
 	provider := "anthropic"
+	upstream := "api.anthropic.com"
 
 	// Log a session start
-	err = logger.LogSessionStart(sessionID, provider, "api.anthropic.com")
+	err = logger.LogSessionStart(sessionID, provider, upstream)
 	if err != nil {
 		t.Fatalf("Failed to log session start: %v", err)
 	}
@@ -35,8 +37,9 @@ func TestLoggerWritesJSONL(t *testing.T) {
 		t.Fatalf("Failed to log request: %v", err)
 	}
 
-	// Verify file was created
-	logPath := filepath.Join(tmpDir, provider, sessionID+".jsonl")
+	// Verify file was created - new path structure: <upstream>/<date>/<sessionID>.jsonl
+	today := time.Now().Format("2006-01-02")
+	logPath := filepath.Join(tmpDir, upstream, today, sessionID+".jsonl")
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("Failed to read log file: %v", err)
@@ -73,6 +76,28 @@ func TestLoggerWritesJSONL(t *testing.T) {
 	}
 }
 
+func TestLogPathStructure(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger, _ := NewLogger(tmpDir)
+	defer logger.Close()
+
+	sessionID := "20260114-091523-abcd1234"
+	upstream := "api.anthropic.com"
+
+	logger.LogSessionStart(sessionID, "anthropic", upstream)
+
+	// Wait for async write
+	time.Sleep(50 * time.Millisecond)
+
+	// Expect: tmpDir/api.anthropic.com/2026-01-14/20260114-091523-abcd1234.jsonl
+	today := time.Now().Format("2006-01-02")
+	expectedPath := filepath.Join(tmpDir, upstream, today, sessionID+".jsonl")
+
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected log at %s", expectedPath)
+	}
+}
+
 func TestLoggerResponseWithTiming(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -84,8 +109,9 @@ func TestLoggerResponseWithTiming(t *testing.T) {
 
 	sessionID := "20260113-102345-test"
 	provider := "anthropic"
+	upstream := "api.anthropic.com"
 
-	logger.LogSessionStart(sessionID, provider, "api.anthropic.com")
+	logger.LogSessionStart(sessionID, provider, upstream)
 
 	timing := ResponseTiming{
 		TTFBMs:  150,
@@ -97,8 +123,9 @@ func TestLoggerResponseWithTiming(t *testing.T) {
 		t.Fatalf("Failed to log response: %v", err)
 	}
 
-	// Read and verify
-	logPath := filepath.Join(tmpDir, provider, sessionID+".jsonl")
+	// Read and verify - new path structure: <upstream>/<date>/<sessionID>.jsonl
+	today := time.Now().Format("2006-01-02")
+	logPath := filepath.Join(tmpDir, upstream, today, sessionID+".jsonl")
 	data, _ := os.ReadFile(logPath)
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSessionManagerNewSession(t *testing.T) {
@@ -155,8 +156,9 @@ func TestForkCopiesLogCorrectly(t *testing.T) {
 		t.Error("Fork should create new session")
 	}
 
-	// Read the forked log file
-	forkedLogPath := filepath.Join(tmpDir, "anthropic", forkSessionID+".jsonl")
+	// Read the forked log file - new path: <upstream>/<date>/<sessionID>.jsonl
+	today := time.Now().Format("2006-01-02")
+	forkedLogPath := filepath.Join(tmpDir, "api.anthropic.com", today, forkSessionID+".jsonl")
 	forkedData, err := os.ReadFile(forkedLogPath)
 	if err != nil {
 		t.Fatalf("Failed to read forked log: %v", err)

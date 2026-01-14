@@ -50,8 +50,9 @@ func TestProxySessionTracking(t *testing.T) {
 	// Give logger time
 	time.Sleep(100 * time.Millisecond)
 
-	// Check that we have session files
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	// Check that we have session files - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(logFiles) == 0 {
 		t.Fatal("Expected at least one log file")
 	}
@@ -108,7 +109,8 @@ func TestProxySessionContinuation(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Check log files - should have exactly 1 session file (continuation, not fork)
-	logFiles, err := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	today := time.Now().Format("2006-01-02")
+	logFiles, err := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if err != nil {
 		t.Fatalf("Failed to glob: %v", err)
 	}
@@ -145,7 +147,8 @@ func TestProxyNonConversationEndpointSkipsLogging(t *testing.T) {
 
 	// Should NOT create log files for non-conversation endpoints
 	time.Sleep(50 * time.Millisecond)
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "anthropic", "*.jsonl"))
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(logFiles) != 0 {
 		t.Errorf("Expected no log files for non-conversation endpoints, got %d", len(logFiles))
 	}
@@ -180,8 +183,9 @@ func TestProxyOpenAIChatCompletionsLogging(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Should create log file in openai directory
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "openai", "*.jsonl"))
+	// Should create log file - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(logFiles) != 1 {
 		t.Errorf("Expected 1 log file, got %d", len(logFiles))
 	}
@@ -216,7 +220,8 @@ func TestProxyOpenAIResponsesAPILogging(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "openai", "*.jsonl"))
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(logFiles) != 1 {
 		t.Errorf("Expected 1 log file, got %d", len(logFiles))
 	}
@@ -255,8 +260,9 @@ func TestProxyOpenAISessionContinuation(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Should have 1 log file (same session)
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "openai", "*.jsonl"))
+	// Should have 1 log file (same session) - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(logFiles) != 1 {
 		t.Errorf("Expected 1 log file (same session), got %d", len(logFiles))
 	}
@@ -291,8 +297,9 @@ func TestProxyOpenAIEmbeddingsSkipped(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Should NOT create log files
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "openai", "*.jsonl"))
+	// Should NOT create log files - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(logFiles) != 0 {
 		t.Errorf("Expected no log files for embeddings, got %d", len(logFiles))
 	}
@@ -332,8 +339,9 @@ func TestProxyOpenAIHeaderSessionID(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Should have 1 log file (same session via header)
-	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, "openai", "*.jsonl"))
+	// Should have 1 log file (same session via header) - new path: <upstream>/<date>/*.jsonl
+	today := time.Now().Format("2006-01-02")
+	logFiles, _ := filepath.Glob(filepath.Join(tmpDir, upstreamHost, today, "*.jsonl"))
 	if len(logFiles) != 1 {
 		t.Errorf("Expected 1 log file (same session via header), got %d", len(logFiles))
 	}

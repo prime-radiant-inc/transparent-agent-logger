@@ -23,9 +23,10 @@ type StreamChunk struct {
 }
 
 type Logger struct {
-	baseDir string
-	mu      sync.Mutex
-	files   map[string]*os.File
+	baseDir   string
+	mu        sync.Mutex
+	files     map[string]*os.File
+	upstreams map[string]string // sessionID -> upstream
 }
 
 func NewLogger(baseDir string) (*Logger, error) {
@@ -34,8 +35,9 @@ func NewLogger(baseDir string) (*Logger, error) {
 	}
 
 	return &Logger{
-		baseDir: baseDir,
-		files:   make(map[string]*os.File),
+		baseDir:   baseDir,
+		files:     make(map[string]*os.File),
+		upstreams: make(map[string]string),
 	}, nil
 }
 
@@ -47,12 +49,11 @@ func (l *Logger) Close() error {
 		f.Close()
 	}
 	l.files = nil
+	l.upstreams = nil
 	return nil
 }
 
-func (l *Logger) getFile(sessionID, provider string) (*os.File, error) {
-	key := provider + "/" + sessionID
-
+func (l *Logger) getFile(sessionID string) (*os.File, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -60,29 +61,36 @@ func (l *Logger) getFile(sessionID, provider string) (*os.File, error) {
 		return nil, fmt.Errorf("logger is closed")
 	}
 
-	if f, ok := l.files[key]; ok {
+	if f, ok := l.files[sessionID]; ok {
 		return f, nil
 	}
 
-	// Create provider directory
-	providerDir := filepath.Join(l.baseDir, provider)
-	if err := os.MkdirAll(providerDir, 0755); err != nil {
+	// Look up the upstream for this session
+	upstream, ok := l.upstreams[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("no upstream registered for session %s", sessionID)
+	}
+
+	// Create directory: <baseDir>/<upstream>/<YYYY-MM-DD>/
+	dateStr := time.Now().Format("2006-01-02")
+	logDir := filepath.Join(l.baseDir, upstream, dateStr)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, err
 	}
 
 	// Open file for append
-	path := filepath.Join(providerDir, sessionID+".jsonl")
+	path := filepath.Join(logDir, sessionID+".jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
 
-	l.files[key] = f
+	l.files[sessionID] = f
 	return f, nil
 }
 
-func (l *Logger) writeEntry(sessionID, provider string, entry interface{}) error {
-	f, err := l.getFile(sessionID, provider)
+func (l *Logger) writeEntry(sessionID string, entry interface{}) error {
+	f, err := l.getFile(sessionID)
 	if err != nil {
 		return err
 	}
@@ -99,14 +107,27 @@ func (l *Logger) writeEntry(sessionID, provider string, entry interface{}) error
 	return err
 }
 
+// RegisterUpstream registers an upstream host for a session.
+// This is used when a forked session needs to write without a session_start.
+func (l *Logger) RegisterUpstream(sessionID, upstream string) {
+	l.mu.Lock()
+	if l.upstreams != nil {
+		l.upstreams[sessionID] = upstream
+	}
+	l.mu.Unlock()
+}
+
 func (l *Logger) LogSessionStart(sessionID, provider, upstream string) error {
+	// Register the upstream for this session
+	l.RegisterUpstream(sessionID, upstream)
+
 	entry := map[string]interface{}{
 		"type":     "session_start",
 		"ts":       time.Now().UTC().Format(time.RFC3339Nano),
 		"provider": provider,
 		"upstream": upstream,
 	}
-	return l.writeEntry(sessionID, provider, entry)
+	return l.writeEntry(sessionID, entry)
 }
 
 func (l *Logger) LogRequest(sessionID, provider string, seq int, method, path string, headers http.Header, body []byte) error {
@@ -120,7 +141,7 @@ func (l *Logger) LogRequest(sessionID, provider string, seq int, method, path st
 		"body":    string(body),
 		"size":    len(body),
 	}
-	return l.writeEntry(sessionID, provider, entry)
+	return l.writeEntry(sessionID, entry)
 }
 
 func (l *Logger) LogResponse(sessionID, provider string, seq int, status int, headers http.Header, body []byte, chunks []StreamChunk, timing ResponseTiming) error {
@@ -140,7 +161,7 @@ func (l *Logger) LogResponse(sessionID, provider string, seq int, status int, he
 		entry["body"] = string(body)
 	}
 
-	return l.writeEntry(sessionID, provider, entry)
+	return l.writeEntry(sessionID, entry)
 }
 
 // LogFork records a fork event when conversation history diverges
@@ -152,5 +173,5 @@ func (l *Logger) LogFork(sessionID, provider string, fromSeq int, parentSession 
 		"parent_session": parentSession,
 		"reason":         "message_history_diverged",
 	}
-	return l.writeEntry(sessionID, provider, entry)
+	return l.writeEntry(sessionID, entry)
 }
