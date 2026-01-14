@@ -331,19 +331,49 @@ pre.raw {
     color: var(--text-muted);
 }
 
-.history-assistant {
+.conversation-history {
     background: rgba(100, 100, 100, 0.1);
     border-left: 3px solid #666;
     margin: 0.5rem 0;
-    padding: 0.5rem 1rem;
+    border-radius: 4px;
 }
 
-.history-assistant summary {
+.conversation-history summary {
     cursor: pointer;
     color: var(--text-muted);
     font-style: italic;
+    padding: 0.5rem 1rem;
 }
 
-.assistant-content-history {
-    margin-top: 0.5rem;
+.history-content {
+    padding: 0 1rem 0.5rem 1rem;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.history-message {
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+.history-user {
+    background: rgba(74, 158, 255, 0.05);
+}
+
+.history-assistant {
+    background: rgba(100, 100, 100, 0.05);
+}
+
+.history-role {
+    font-weight: bold;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.history-message pre.text {
+    margin: 0;
+    font-size: 0.85rem;
 }

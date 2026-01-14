@@ -73,12 +73,13 @@ type SearchResult struct {
 }
 
 type ParsedTurn struct {
-	Seq        int
-	RequestID  string
-	Request    *LogEntry
-	Response   *LogEntry
-	ReqParsed  ParsedRequest
-	RespParsed ParsedResponse
+	Seq             int
+	RequestID       string
+	Request         *LogEntry
+	Response        *LogEntry
+	ReqParsed       ParsedRequest
+	RespParsed      ParsedResponse
+	LastUserMessage *ParsedMessage // Just the last user message (new content for this turn)
 }
 
 func NewExplorer(logDir string) *Explorer {
@@ -402,11 +403,22 @@ func (e *Explorer) groupAndParseTurns(entries []LogEntry, host string) []ParsedT
 		entry := &entries[i]
 		if entry.Type == "request" {
 			reqParsed := ParseRequestBody(entry.Body, host)
+
+			// Extract the last user message (the new content for this turn)
+			var lastUserMsg *ParsedMessage
+			for j := len(reqParsed.Messages) - 1; j >= 0; j-- {
+				if reqParsed.Messages[j].Role == "user" {
+					lastUserMsg = &reqParsed.Messages[j]
+					break
+				}
+			}
+
 			turn := &ParsedTurn{
-				Seq:       entry.Seq,
-				RequestID: entry.Meta.RequestID,
-				Request:   entry,
-				ReqParsed: reqParsed,
+				Seq:             entry.Seq,
+				RequestID:       entry.Meta.RequestID,
+				Request:         entry,
+				ReqParsed:       reqParsed,
+				LastUserMessage: lastUserMsg,
 			}
 			if entry.Meta.RequestID != "" {
 				turnMapByRequestID[entry.Meta.RequestID] = turn

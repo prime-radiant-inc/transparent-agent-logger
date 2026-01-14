@@ -41,46 +41,67 @@
                 </details>
                 {{end}}
 
-                {{range .ReqParsed.Messages}}
-                    {{if eq .Role "user"}}
-                    <div class="content user-content">
-                        {{range .Content}}
-                            {{if eq .Type "text"}}
-                            <pre class="text">{{.Text}}</pre>
-                            {{else if eq .Type "tool_result"}}
-                            <div class="tool-result">
-                                <div class="tool-header">Tool Result ({{.ToolID}})</div>
-                                <pre>{{.Text}}</pre>
+                {{/* Show only the last user message - the new content for this turn */}}
+                {{if .LastUserMessage}}
+                <div class="content user-content">
+                    {{range .LastUserMessage.Content}}
+                        {{if eq .Type "text"}}
+                        <pre class="text">{{.Text}}</pre>
+                        {{else if eq .Type "tool_result"}}
+                        <div class="tool-result">
+                            <div class="tool-header">Tool Result ({{.ToolID}})</div>
+                            <pre>{{.Text}}</pre>
+                        </div>
+                        {{end}}
+                    {{end}}
+                    {{/* Fallback for simple string content */}}
+                    {{if and .LastUserMessage.TextContent (not .LastUserMessage.Content)}}
+                        <pre class="text">{{.LastUserMessage.TextContent}}</pre>
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{/* Collapsed section for conversation history if there are previous messages */}}
+                {{if gt (len .ReqParsed.Messages) 1}}
+                <details class="conversation-history">
+                    <summary>Conversation History ({{len .ReqParsed.Messages}} messages)</summary>
+                    <div class="history-content">
+                        {{range .ReqParsed.Messages}}
+                            {{if eq .Role "user"}}
+                            <div class="history-message history-user">
+                                <span class="history-role">User:</span>
+                                {{range .Content}}
+                                    {{if eq .Type "text"}}
+                                    <pre class="text">{{.Text}}</pre>
+                                    {{else if eq .Type "tool_result"}}
+                                    <div class="tool-result">
+                                        <div class="tool-header">Tool Result ({{.ToolID}})</div>
+                                        <pre>{{.Text}}</pre>
+                                    </div>
+                                    {{end}}
+                                {{end}}
+                                {{if and .TextContent (not .Content)}}
+                                    <pre class="text">{{.TextContent}}</pre>
+                                {{end}}
+                            </div>
+                            {{else if eq .Role "assistant"}}
+                            <div class="history-message history-assistant">
+                                <span class="history-role">Assistant:</span>
+                                {{range .Content}}
+                                    {{if eq .Type "text"}}
+                                    <pre class="text">{{.Text}}</pre>
+                                    {{else if eq .Type "tool_use"}}
+                                    <div class="tool-call">
+                                        <div class="tool-header">{{.ToolName}}</div>
+                                        <pre class="tool-input">{{printf "%v" .ToolInput}}</pre>
+                                    </div>
+                                    {{end}}
+                                {{end}}
                             </div>
                             {{end}}
                         {{end}}
-                        {{/* Fallback for simple string content */}}
-                        {{if and .TextContent (not .Content)}}
-                            <pre class="text">{{.TextContent}}</pre>
-                        {{end}}
                     </div>
-                    {{else if eq .Role "assistant"}}
-                    <details class="history-assistant">
-                        <summary>Previous Assistant Response</summary>
-                        <div class="content assistant-content-history">
-                            {{range .Content}}
-                                {{if eq .Type "thinking"}}
-                                <details class="thinking-block">
-                                    <summary>Thinking...</summary>
-                                    <pre class="thinking">{{.Thinking}}</pre>
-                                </details>
-                                {{else if eq .Type "text"}}
-                                <pre class="text">{{.Text}}</pre>
-                                {{else if eq .Type "tool_use"}}
-                                <div class="tool-call">
-                                    <div class="tool-header">{{.ToolName}}</div>
-                                    <pre class="tool-input">{{printf "%v" .ToolInput}}</pre>
-                                </div>
-                                {{end}}
-                            {{end}}
-                        </div>
-                    </details>
-                    {{end}}
+                </details>
                 {{end}}
 
                 <details>
