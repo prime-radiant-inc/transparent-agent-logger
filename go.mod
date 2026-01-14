@@ -1,4 +1,4 @@
-module github.com/obra/llm-proxy
+module github.com/prime-radiant-inc/llm-proxy
 
 go 1.24.0
 

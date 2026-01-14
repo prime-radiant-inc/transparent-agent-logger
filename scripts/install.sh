@@ -16,7 +16,7 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
 # Download URL (update for real releases)
 VERSION="${LLM_PROXY_VERSION:-latest}"
-URL="https://github.com/obra/llm-proxy/releases/download/${VERSION}/llm-proxy-${OS}-${ARCH}"
+URL="https://github.com/prime-radiant-inc/llm-proxy/releases/download/${VERSION}/llm-proxy-${OS}-${ARCH}"
 
 echo "Downloading from $URL..."
 curl -fsSL "$URL" -o /tmp/llm-proxy

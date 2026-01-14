@@ -7,7 +7,7 @@ A transparent logging proxy for LLM API traffic. Install once, and every request
 ### macOS (Homebrew)
 
 ```bash
-brew install obra/tap/llm-proxy
+brew install prime-radiant-inc/tap/llm-proxy
 brew services start llm-proxy
 ```
 

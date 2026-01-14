@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build release binaries
+        run: |
+          mkdir -p dist
+          for OS in darwin linux; do
+            for ARCH in amd64 arm64; do
+              echo "Building $OS/$ARCH..."
+              GOOS=$OS GOARCH=$ARCH go build -ldflags="-s -w" -o "dist/llm-proxy-$OS-$ARCH" .
+            done
+          done
+          # Create tarballs for Homebrew
+          cd dist
+          for f in llm-proxy-darwin-*; do
+            tar -czf "${f}.tar.gz" "$f"
+          done
+          # Generate checksums
+          sha256sum * > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/llm-proxy-*
+            dist/checksums.txt
+          generate_release_notes: true
