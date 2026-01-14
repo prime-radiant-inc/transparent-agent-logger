@@ -83,3 +83,35 @@ func TestSessionInfoIncludesMessageCount(t *testing.T) {
 		t.Error("Expected non-empty time range")
 	}
 }
+
+func TestSessionDetailShowsEntries(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sessionDir := filepath.Join(tmpDir, "api.anthropic.com", "2026-01-14")
+	os.MkdirAll(sessionDir, 0755)
+
+	content := `{"type":"session_start","_meta":{"ts":"2026-01-14T10:00:00Z","host":"api.anthropic.com","session":"abc123"}}
+{"type":"request","seq":1,"body":"{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}","_meta":{"ts":"2026-01-14T10:00:01Z"}}
+{"type":"response","seq":1,"body":"{\"content\":[{\"type\":\"text\",\"text\":\"Hi there!\"}]}","_meta":{"ts":"2026-01-14T10:00:02Z"}}
+`
+	os.WriteFile(filepath.Join(sessionDir, "abc123.jsonl"), []byte(content), 0644)
+
+	explorer := NewExplorer(tmpDir)
+
+	req := httptest.NewRequest("GET", "/session/abc123", nil)
+	w := httptest.NewRecorder()
+
+	explorer.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Hello") {
+		t.Error("Expected session detail to show user message")
+	}
+	if !strings.Contains(body, "Hi there") {
+		t.Error("Expected session detail to show assistant response")
+	}
+}

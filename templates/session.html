@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Session - LLM Proxy Explorer</title>
+    <title>Session {{.SessionID}} - LLM Proxy Explorer</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -14,8 +14,37 @@
         </form>
     </nav>
     <main>
-        <h2>Session: {{.SessionID}}</h2>
-        <p>Not yet implemented</p>
+        <h2>Session: <code>{{.SessionID}}</code></h2>
+
+        {{range .Turns}}
+        <div class="turn">
+            {{if .Request}}
+            <div class="message request">
+                <div class="role">Request #{{.Request.Seq}}</div>
+                <div class="content">
+                    <pre>{{.Request.Body}}</pre>
+                </div>
+                <details>
+                    <summary>Raw JSON</summary>
+                    <pre class="raw">{{.Request.Raw}}</pre>
+                </details>
+            </div>
+            {{end}}
+
+            {{if .Response}}
+            <div class="message response">
+                <div class="role">Response #{{.Response.Seq}} ({{.Response.Status}})</div>
+                <div class="content">
+                    <pre>{{.Response.Body}}</pre>
+                </div>
+                <details>
+                    <summary>Raw JSON</summary>
+                    <pre class="raw">{{.Response.Raw}}</pre>
+                </details>
+            </div>
+            {{end}}
+        </div>
+        {{end}}
     </main>
 </body>
 </html>

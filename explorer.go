@@ -37,6 +37,28 @@ type SessionInfo struct {
 	LastTime     time.Time
 }
 
+type LogEntry struct {
+	Type    string
+	Seq     int
+	Body    string
+	Headers map[string][]string
+	Status  int
+	Meta    EntryMeta
+	Raw     string // Original JSON line
+}
+
+type EntryMeta struct {
+	Timestamp time.Time
+	Machine   string
+	Host      string
+	Session   string
+}
+
+type ConversationTurn struct {
+	Request  *LogEntry
+	Response *LogEntry
+}
+
 func NewExplorer(logDir string) *Explorer {
 	tmpl := template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
@@ -167,8 +189,130 @@ func (e *Explorer) parseSessionMetadata(session *SessionInfo) {
 }
 
 func (e *Explorer) handleSession(w http.ResponseWriter, r *http.Request) {
-	// TODO: implement in Task 4
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	sessionID := strings.TrimPrefix(r.URL.Path, "/session/")
+	if sessionID == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Find the session file
+	sessionPath := e.findSessionFile(sessionID)
+	if sessionPath == "" {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	entries, err := e.parseSessionFile(sessionPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Group into conversation turns
+	turns := e.groupIntoTurns(entries)
+
+	e.templates.ExecuteTemplate(w, "session.html", map[string]interface{}{
+		"SessionID": sessionID,
+		"Entries":   entries,
+		"Turns":     turns,
+	})
+}
+
+func (e *Explorer) findSessionFile(sessionID string) string {
+	var found string
+	filepath.Walk(e.logDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(info.Name(), sessionID+".jsonl") {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+func (e *Explorer) parseSessionFile(path string) ([]LogEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []LogEntry
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+
+		var raw map[string]interface{}
+		if json.Unmarshal([]byte(line), &raw) != nil {
+			continue
+		}
+
+		entry := LogEntry{
+			Raw: line,
+		}
+
+		if t, ok := raw["type"].(string); ok {
+			entry.Type = t
+		}
+		if s, ok := raw["seq"].(float64); ok {
+			entry.Seq = int(s)
+		}
+		if b, ok := raw["body"].(string); ok {
+			entry.Body = b
+		}
+		if s, ok := raw["status"].(float64); ok {
+			entry.Status = int(s)
+		}
+
+		if meta, ok := raw["_meta"].(map[string]interface{}); ok {
+			if ts, ok := meta["ts"].(string); ok {
+				entry.Meta.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
+			}
+			if m, ok := meta["machine"].(string); ok {
+				entry.Meta.Machine = m
+			}
+			if h, ok := meta["host"].(string); ok {
+				entry.Meta.Host = h
+			}
+			if s, ok := meta["session"].(string); ok {
+				entry.Meta.Session = s
+			}
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+func (e *Explorer) groupIntoTurns(entries []LogEntry) []ConversationTurn {
+	var turns []ConversationTurn
+	turnMap := make(map[int]*ConversationTurn)
+
+	for i := range entries {
+		entry := &entries[i]
+		if entry.Type == "request" {
+			turn := &ConversationTurn{Request: entry}
+			turnMap[entry.Seq] = turn
+			turns = append(turns, *turn)
+		} else if entry.Type == "response" {
+			if turn, ok := turnMap[entry.Seq]; ok {
+				turn.Response = entry
+				// Update in slice
+				for j := range turns {
+					if turns[j].Request != nil && turns[j].Request.Seq == entry.Seq {
+						turns[j].Response = entry
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return turns
 }
 
 func (e *Explorer) handleSearch(w http.ResponseWriter, r *http.Request) {

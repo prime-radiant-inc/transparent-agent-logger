@@ -90,3 +90,52 @@ h2, h3 {
     color: var(--text-muted);
     font-size: 0.85rem;
 }
+
+.turn {
+    margin: 2rem 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.message {
+    padding: 1rem;
+}
+
+.message.request {
+    background: var(--bg-secondary);
+}
+
+.message.response {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+}
+
+.message .role {
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+}
+
+.message .content pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: rgba(0,0,0,0.2);
+    padding: 1rem;
+    border-radius: 4px;
+    overflow-x: auto;
+}
+
+details {
+    margin-top: 0.5rem;
+}
+
+summary {
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.raw {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
