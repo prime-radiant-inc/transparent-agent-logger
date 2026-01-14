@@ -17,22 +17,39 @@ type Proxy struct {
 	sessionManager *SessionManager
 }
 
+// createPassthroughClient creates an HTTP client configured for true passthrough proxying
+func createPassthroughClient() *http.Client {
+	transport := &http.Transport{
+		// Disable automatic compression - preserve original encoding for passthrough
+		DisableCompression: true,
+		// Use reasonable timeouts for LLM APIs (can have long responses)
+		ResponseHeaderTimeout: 0, // No timeout - streaming can be very long
+		// Enable HTTP/2 (default in Go, but be explicit)
+		ForceAttemptHTTP2: true,
+	}
+	return &http.Client{
+		Transport: transport,
+		// No timeout - let context handle cancellation
+		Timeout: 0,
+	}
+}
+
 func NewProxy() *Proxy {
 	return &Proxy{
-		client: &http.Client{},
+		client: createPassthroughClient(),
 	}
 }
 
 func NewProxyWithLogger(logger *Logger) *Proxy {
 	return &Proxy{
-		client: &http.Client{},
+		client: createPassthroughClient(),
 		logger: logger,
 	}
 }
 
 func NewProxyWithSessionManager(logger *Logger, sm *SessionManager) *Proxy {
 	return &Proxy{
-		client:         &http.Client{},
+		client:         createPassthroughClient(),
 		logger:         logger,
 		sessionManager: sm,
 	}
@@ -186,8 +203,38 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(respBody)
 }
 
+// Hop-by-hop headers that should not be forwarded (RFC 7230, section 6.1)
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Proxy-Connection":    true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+}
+
+// copyHeaders copies headers from src to dst, filtering out hop-by-hop headers
 func copyHeaders(dst, src http.Header) {
+	// First, get any additional hop-by-hop headers from the Connection header
+	connectionHeaders := make(map[string]bool)
+	if conn := src.Get("Connection"); conn != "" {
+		for _, h := range strings.Split(conn, ",") {
+			connectionHeaders[http.CanonicalHeaderKey(strings.TrimSpace(h))] = true
+		}
+	}
+
 	for key, values := range src {
+		// Skip hop-by-hop headers
+		if hopByHopHeaders[key] {
+			continue
+		}
+		// Skip headers listed in Connection header
+		if connectionHeaders[key] {
+			continue
+		}
 		for _, value := range values {
 			dst.Add(key, value)
 		}
