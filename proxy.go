@@ -13,6 +13,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// ProxyLogger is the interface for logging proxy requests and responses.
+// Both *Logger (file-based) and *MultiWriter (fan-out) implement this interface.
+type ProxyLogger interface {
+	RegisterUpstream(sessionID, upstream string)
+	LogSessionStart(sessionID, provider, upstream string) error
+	LogRequest(sessionID, provider string, seq int, method, path string, headers http.Header, body []byte, requestID string) error
+	LogResponse(sessionID, provider string, seq int, status int, headers http.Header, body []byte, chunks []StreamChunk, timing ResponseTiming, requestID string) error
+	LogFork(sessionID, provider string, fromSeq int, parentSession string) error
+	Close() error
+}
+
 type Proxy struct {
 	client         *http.Client
 	logger         *Logger
