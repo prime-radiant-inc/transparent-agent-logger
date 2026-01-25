@@ -78,6 +78,8 @@ Proxy URLs follow the pattern: `/{provider}/{upstream}/{path}`
 | `urlparse.go` | Proxy URL parsing and validation |
 | `config.go` | TOML config + environment variable loading |
 | `setup.go` | Shell integration, systemd service installation |
+| `loki_exporter.go` | Async Loki push client with batching and retry |
+| `multi_writer.go` | Wraps file logger + Loki exporter for dual output |
 
 ### Session Tracking
 
@@ -101,6 +103,14 @@ Sessions are tracked via `client_session_id` extracted from request bodies (e.g.
 | `LLM_PROXY_LOG_DIR` | Log directory (default: `~/.llm-provider-logs/`) |
 | `ANTHROPIC_BASE_URL` | Set by `--env` to route Anthropic traffic through proxy |
 | `OPENAI_BASE_URL` | Set by `--env` to route OpenAI traffic through proxy |
+| `LLM_PROXY_LOKI_ENABLED` | Enable Loki export (`true` or `1`) |
+| `LLM_PROXY_LOKI_URL` | Loki push endpoint URL |
+| `LLM_PROXY_LOKI_AUTH_TOKEN` | Bearer token for authenticated Loki endpoints |
+| `LLM_PROXY_LOKI_BATCH_SIZE` | Entries per batch (default: 1000) |
+| `LLM_PROXY_LOKI_BATCH_WAIT` | Duration before flush (default: `5s`) |
+| `LLM_PROXY_LOKI_RETRY_MAX` | Max retry attempts (default: 5) |
+| `LLM_PROXY_LOKI_USE_GZIP` | Enable gzip compression (`true` or `1`, default: true) |
+| `LLM_PROXY_LOKI_ENVIRONMENT` | Environment label for Grafana filtering |
 
 ## File Locations
 

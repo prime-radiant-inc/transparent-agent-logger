@@ -49,6 +49,46 @@ LLM Proxy sits between your LLM clients (Claude Code, Codex, API scripts) and th
 
 Each session is a JSONL file with request/response pairs, timing information, and metadata.
 
+## Remote Push (Loki Export)
+
+Optionally export logs in real-time to [Grafana Loki](https://grafana.com/oss/loki/) for centralized observability. Useful for aggregating logs across ephemeral containers or multiple machines.
+
+### Configuration
+
+Add a `[loki]` section to `~/.config/llm-proxy/config.toml`:
+
+```toml
+[loki]
+enabled = true
+url = "http://loki.example.com:3100/loki/api/v1/push"
+auth_token = ""        # Optional: Bearer token for authenticated endpoints
+batch_size = 1000      # Entries per batch (default: 1000)
+batch_wait = "5s"      # Max time before flushing batch (default: 5s)
+retry_max = 5          # Retry attempts on failure (default: 5)
+use_gzip = true        # Compress payloads (default: true)
+environment = "production"  # Label for filtering in Grafana
+```
+
+Or use environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `LLM_PROXY_LOKI_ENABLED` | Set to `true` or `1` to enable |
+| `LLM_PROXY_LOKI_URL` | Loki push endpoint URL |
+| `LLM_PROXY_LOKI_AUTH_TOKEN` | Bearer token for auth |
+| `LLM_PROXY_LOKI_BATCH_SIZE` | Entries per batch |
+| `LLM_PROXY_LOKI_BATCH_WAIT` | Duration before flush (e.g., `5s`, `10s`) |
+| `LLM_PROXY_LOKI_RETRY_MAX` | Max retry attempts |
+| `LLM_PROXY_LOKI_USE_GZIP` | Set to `true` or `1` for compression |
+| `LLM_PROXY_LOKI_ENVIRONMENT` | Environment label |
+
+### Behavior
+
+- **Non-blocking**: Loki export runs asynchronously and doesn't add latency to proxied requests
+- **Graceful degradation**: If Loki is unavailable, local file logging continues unaffected
+- **Buffered writes**: Logs are batched and retried on failure; buffer is flushed on shutdown
+- **Session correlation**: Logs include session IDs for querying all entries from a single session
+
 ## Commands
 
 ```bash
