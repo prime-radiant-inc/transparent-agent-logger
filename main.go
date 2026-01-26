@@ -209,8 +209,8 @@ func main() {
 
 	// Service mode overrides: use dynamic port and default log dir
 	if cfg.ServiceMode {
-		// Use port 0 for dynamic assignment unless explicitly set via --port
-		if flags.Port == 0 {
+		// Use port 0 for dynamic assignment unless explicitly set via --port or config file
+		if flags.Port == 0 && cfg.Port == 0 {
 			cfg.Port = 0
 		}
 		// Use ~/.llm-provider-logs/ unless explicitly set via --log-dir
