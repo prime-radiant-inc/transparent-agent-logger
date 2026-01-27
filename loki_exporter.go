@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,6 +54,14 @@ type lokiEntry struct {
 	timestamp time.Time
 	logType   string
 	machine   string
+
+	// Extended labels for richer querying (PRI-298)
+	model          string // LLM model name (e.g., "claude-sonnet-4-20250514")
+	statusBucket   string // HTTP status bucket: "2xx", "4xx", "5xx", or empty
+	stream         string // "true" or "false" for streaming requests
+	hasTools       string // "true" or "false" if request includes tools
+	stopReason     string // Response stop reason (e.g., "end_turn", "max_tokens")
+	ratelimitStatus string // Rate limit status from response headers
 }
 
 // LokiExporter handles async batching and pushing logs to Loki
@@ -114,6 +123,168 @@ func NewLokiExporter(cfg LokiExporterConfig) (*LokiExporter, error) {
 	return exporter, nil
 }
 
+// extractExtendedLabels extracts additional low-cardinality labels from log entries.
+// Returns empty strings for labels that don't apply to the given log type.
+func extractExtendedLabels(entry map[string]interface{}, logType string) (model, statusBucket, stream, hasTools, stopReason, ratelimitStatus string) {
+	switch logType {
+	case "request":
+		// Parse request body to extract model, stream, and tools
+		if bodyStr, ok := entry["body"].(string); ok && bodyStr != "" {
+			var body map[string]interface{}
+			if err := json.Unmarshal([]byte(bodyStr), &body); err == nil {
+				// Extract model
+				if m, ok := body["model"].(string); ok {
+					model = m
+				}
+				// Extract stream boolean
+				if s, ok := body["stream"].(bool); ok {
+					if s {
+						stream = "true"
+					} else {
+						stream = "false"
+					}
+				}
+				// Check for tools presence
+				if tools, ok := body["tools"]; ok && tools != nil {
+					if toolsArr, ok := tools.([]interface{}); ok && len(toolsArr) > 0 {
+						hasTools = "true"
+					} else {
+						hasTools = "false"
+					}
+				} else {
+					hasTools = "false"
+				}
+			}
+		}
+
+	case "response":
+		// Extract status bucket from HTTP status code
+		if status, ok := entry["status"].(float64); ok {
+			statusCode := int(status)
+			if statusCode >= 200 && statusCode < 300 {
+				statusBucket = "2xx"
+			} else if statusCode >= 400 && statusCode < 500 {
+				statusBucket = "4xx"
+			} else if statusCode >= 500 {
+				statusBucket = "5xx"
+			}
+		} else if status, ok := entry["status"].(int); ok {
+			if status >= 200 && status < 300 {
+				statusBucket = "2xx"
+			} else if status >= 400 && status < 500 {
+				statusBucket = "4xx"
+			} else if status >= 500 {
+				statusBucket = "5xx"
+			}
+		}
+
+		// Extract rate limit status from headers
+		if headers, ok := entry["headers"].(http.Header); ok {
+			if rlStatus := headers.Get("Anthropic-Ratelimit-Unified-Status"); rlStatus != "" {
+				ratelimitStatus = strings.ToLower(rlStatus)
+			}
+		} else if headers, ok := entry["headers"].(map[string]interface{}); ok {
+			// Headers may come as map[string]interface{} when decoded from JSON
+			if rlStatus, ok := headers["Anthropic-Ratelimit-Unified-Status"].(string); ok {
+				ratelimitStatus = strings.ToLower(rlStatus)
+			} else if rlStatusArr, ok := headers["Anthropic-Ratelimit-Unified-Status"].([]interface{}); ok && len(rlStatusArr) > 0 {
+				if s, ok := rlStatusArr[0].(string); ok {
+					ratelimitStatus = strings.ToLower(s)
+				}
+			}
+		}
+
+		// Extract stop_reason from response body or chunks
+		stopReason = extractStopReason(entry)
+	}
+
+	return
+}
+
+// extractStopReason extracts the stop_reason from a response entry.
+// For streaming responses, it looks in the final chunk's delta.
+// For non-streaming, it looks in the body directly.
+func extractStopReason(entry map[string]interface{}) string {
+	// Try body first (non-streaming)
+	if sr := extractStopReasonFromBody(entry["body"]); sr != "" {
+		return sr
+	}
+
+	// For streaming responses, extract raw chunk data and search for stop_reason
+	chunkData := extractChunkRawData(entry["chunks"])
+	return findStopReasonInChunks(chunkData)
+}
+
+// extractStopReasonFromBody parses body JSON and extracts stop_reason
+func extractStopReasonFromBody(body interface{}) string {
+	bodyStr, ok := body.(string)
+	if !ok || bodyStr == "" {
+		return ""
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(bodyStr), &parsed); err != nil {
+		return ""
+	}
+	if sr, ok := parsed["stop_reason"].(string); ok {
+		return sr
+	}
+	return ""
+}
+
+// extractChunkRawData normalizes chunk data from different sources into a slice of raw JSON strings.
+// Handles both []StreamChunk (direct) and []interface{} (JSON-decoded).
+func extractChunkRawData(chunks interface{}) []string {
+	if chunks == nil {
+		return nil
+	}
+
+	// Direct StreamChunk slice (from multi_writer.go)
+	if streamChunks, ok := chunks.([]StreamChunk); ok {
+		result := make([]string, len(streamChunks))
+		for i, c := range streamChunks {
+			result[i] = c.Raw
+		}
+		return result
+	}
+
+	// JSON-decoded slice (from tests or serialization)
+	if interfaceSlice, ok := chunks.([]interface{}); ok {
+		result := make([]string, 0, len(interfaceSlice))
+		for _, item := range interfaceSlice {
+			if chunk, ok := item.(map[string]interface{}); ok {
+				// Try "raw" (matches StreamChunk field name)
+				if raw, ok := chunk["raw"].(string); ok {
+					result = append(result, raw)
+				}
+			}
+		}
+		return result
+	}
+
+	return nil
+}
+
+// findStopReasonInChunks searches chunks (from end) for a message_delta event with stop_reason
+func findStopReasonInChunks(chunkData []string) string {
+	for i := len(chunkData) - 1; i >= 0; i-- {
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(chunkData[i]), &event); err != nil {
+			continue
+		}
+		if event["type"] != "message_delta" {
+			continue
+		}
+		delta, ok := event["delta"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if sr, ok := delta["stop_reason"].(string); ok {
+			return sr
+		}
+	}
+	return ""
+}
+
 // Push adds a log entry to the queue for async export to Loki.
 // This method is non-blocking - if the channel is full, the entry is dropped.
 func (e *LokiExporter) Push(entry map[string]interface{}, provider string) {
@@ -141,12 +312,21 @@ func (e *LokiExporter) Push(entry map[string]interface{}, provider string) {
 		}
 	}
 
+	// Extract extended labels (PRI-298)
+	model, statusBucket, stream, hasTools, stopReason, ratelimitStatus := extractExtendedLabels(entry, logType)
+
 	le := lokiEntry{
-		entry:     entry,
-		provider:  provider,
-		timestamp: timestamp,
-		logType:   logType,
-		machine:   machine,
+		entry:           entry,
+		provider:        provider,
+		timestamp:       timestamp,
+		logType:         logType,
+		machine:         machine,
+		model:           model,
+		statusBucket:    statusBucket,
+		stream:          stream,
+		hasTools:        hasTools,
+		stopReason:      stopReason,
+		ratelimitStatus: ratelimitStatus,
 	}
 
 	// Non-blocking send with drop if full
@@ -223,13 +403,39 @@ func (e *LokiExporter) sendBatch(entries []lokiEntry) {
 			"log_type":    entry.logType,
 		}
 
-		// Create label key for grouping
-		labelKey := fmt.Sprintf("%s|%s|%s|%s|%s",
+		// Add extended labels only if they have values (PRI-298)
+		if entry.model != "" {
+			labels["model"] = entry.model
+		}
+		if entry.statusBucket != "" {
+			labels["status_bucket"] = entry.statusBucket
+		}
+		if entry.stream != "" {
+			labels["stream"] = entry.stream
+		}
+		if entry.hasTools != "" {
+			labels["has_tools"] = entry.hasTools
+		}
+		if entry.stopReason != "" {
+			labels["stop_reason"] = entry.stopReason
+		}
+		if entry.ratelimitStatus != "" {
+			labels["ratelimit_status"] = entry.ratelimitStatus
+		}
+
+		// Create label key for grouping (include all labels for proper stream separation)
+		labelKey := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
 			labels["app"],
 			labels["provider"],
 			labels["environment"],
 			labels["machine"],
 			labels["log_type"],
+			entry.model,
+			entry.statusBucket,
+			entry.stream,
+			entry.hasTools,
+			entry.stopReason,
+			entry.ratelimitStatus,
 		)
 
 		// Get or create stream for this label set

@@ -982,6 +982,282 @@ func TestDoSend_ReturnsErrorOn4xx(t *testing.T) {
 	}
 }
 
+// Tests for extended labels (PRI-298)
+
+func TestExtractExtendedLabels_Request(t *testing.T) {
+	// Test request with model, stream, and tools
+	entry := map[string]interface{}{
+		"type": "request",
+		"body": `{"model":"claude-sonnet-4-20250514","stream":true,"tools":[{"name":"bash"}],"messages":[]}`,
+	}
+
+	model, statusBucket, stream, hasTools, stopReason, ratelimitStatus := extractExtendedLabels(entry, "request")
+
+	if model != "claude-sonnet-4-20250514" {
+		t.Errorf("expected model 'claude-sonnet-4-20250514', got %q", model)
+	}
+	if stream != "true" {
+		t.Errorf("expected stream 'true', got %q", stream)
+	}
+	if hasTools != "true" {
+		t.Errorf("expected hasTools 'true', got %q", hasTools)
+	}
+	// These should be empty for requests
+	if statusBucket != "" {
+		t.Errorf("expected empty statusBucket for request, got %q", statusBucket)
+	}
+	if stopReason != "" {
+		t.Errorf("expected empty stopReason for request, got %q", stopReason)
+	}
+	if ratelimitStatus != "" {
+		t.Errorf("expected empty ratelimitStatus for request, got %q", ratelimitStatus)
+	}
+}
+
+func TestExtractExtendedLabels_RequestNoTools(t *testing.T) {
+	entry := map[string]interface{}{
+		"type": "request",
+		"body": `{"model":"gpt-4","stream":false,"messages":[]}`,
+	}
+
+	model, _, stream, hasTools, _, _ := extractExtendedLabels(entry, "request")
+
+	if model != "gpt-4" {
+		t.Errorf("expected model 'gpt-4', got %q", model)
+	}
+	if stream != "false" {
+		t.Errorf("expected stream 'false', got %q", stream)
+	}
+	if hasTools != "false" {
+		t.Errorf("expected hasTools 'false' when no tools, got %q", hasTools)
+	}
+}
+
+func TestExtractExtendedLabels_Response2xx(t *testing.T) {
+	entry := map[string]interface{}{
+		"type":   "response",
+		"status": 200,
+		"body":   `{"stop_reason":"end_turn"}`,
+		"headers": map[string]interface{}{
+			"Anthropic-Ratelimit-Unified-Status": "allowed",
+		},
+	}
+
+	_, statusBucket, _, _, stopReason, ratelimitStatus := extractExtendedLabels(entry, "response")
+
+	if statusBucket != "2xx" {
+		t.Errorf("expected statusBucket '2xx', got %q", statusBucket)
+	}
+	if stopReason != "end_turn" {
+		t.Errorf("expected stopReason 'end_turn', got %q", stopReason)
+	}
+	if ratelimitStatus != "allowed" {
+		t.Errorf("expected ratelimitStatus 'allowed', got %q", ratelimitStatus)
+	}
+}
+
+func TestExtractExtendedLabels_Response4xx(t *testing.T) {
+	entry := map[string]interface{}{
+		"type":   "response",
+		"status": 429,
+		"headers": map[string]interface{}{
+			"Anthropic-Ratelimit-Unified-Status": "limited",
+		},
+	}
+
+	_, statusBucket, _, _, _, ratelimitStatus := extractExtendedLabels(entry, "response")
+
+	if statusBucket != "4xx" {
+		t.Errorf("expected statusBucket '4xx', got %q", statusBucket)
+	}
+	if ratelimitStatus != "limited" {
+		t.Errorf("expected ratelimitStatus 'limited', got %q", ratelimitStatus)
+	}
+}
+
+func TestExtractExtendedLabels_Response5xx(t *testing.T) {
+	entry := map[string]interface{}{
+		"type":   "response",
+		"status": 500,
+	}
+
+	_, statusBucket, _, _, _, _ := extractExtendedLabels(entry, "response")
+
+	if statusBucket != "5xx" {
+		t.Errorf("expected statusBucket '5xx', got %q", statusBucket)
+	}
+}
+
+func TestExtractExtendedLabels_ResponseFloat64Status(t *testing.T) {
+	// JSON unmarshaling produces float64 for numbers
+	entry := map[string]interface{}{
+		"type":   "response",
+		"status": float64(201),
+	}
+
+	_, statusBucket, _, _, _, _ := extractExtendedLabels(entry, "response")
+
+	if statusBucket != "2xx" {
+		t.Errorf("expected statusBucket '2xx' for float64 status, got %q", statusBucket)
+	}
+}
+
+func TestExtractExtendedLabels_SessionStart(t *testing.T) {
+	// session_start logs should have no extended labels
+	entry := map[string]interface{}{
+		"type": "session_start",
+	}
+
+	model, statusBucket, stream, hasTools, stopReason, ratelimitStatus := extractExtendedLabels(entry, "session_start")
+
+	if model != "" || statusBucket != "" || stream != "" || hasTools != "" || stopReason != "" || ratelimitStatus != "" {
+		t.Error("expected all extended labels to be empty for session_start")
+	}
+}
+
+func TestExtractStopReason_NonStreaming(t *testing.T) {
+	entry := map[string]interface{}{
+		"body": `{"stop_reason":"max_tokens","content":[]}`,
+	}
+
+	stopReason := extractStopReason(entry)
+
+	if stopReason != "max_tokens" {
+		t.Errorf("expected stopReason 'max_tokens', got %q", stopReason)
+	}
+}
+
+func TestExtractStopReason_Streaming(t *testing.T) {
+	// Simulate streaming chunks with message_delta containing stop_reason
+	entry := map[string]interface{}{
+		"chunks": []interface{}{
+			map[string]interface{}{
+				"raw": `{"type":"content_block_delta","delta":{"text":"hello"}}`,
+			},
+			map[string]interface{}{
+				"raw": `{"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+			},
+		},
+	}
+
+	stopReason := extractStopReason(entry)
+
+	if stopReason != "tool_use" {
+		t.Errorf("expected stopReason 'tool_use', got %q", stopReason)
+	}
+}
+
+func TestPush_ExtractsExtendedLabels(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := map[string]interface{}{
+		"type": "request",
+		"body": `{"model":"claude-opus-4-5-20251101","stream":true,"tools":[{"name":"bash"}]}`,
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+			"machine": "test@host",
+		},
+	}
+
+	exporter.Push(entry, "anthropic")
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	// Check extended labels are present
+	if stream.Stream["model"] != "claude-opus-4-5-20251101" {
+		t.Errorf("expected model label 'claude-opus-4-5-20251101', got %q", stream.Stream["model"])
+	}
+	if stream.Stream["stream"] != "true" {
+		t.Errorf("expected stream label 'true', got %q", stream.Stream["stream"])
+	}
+	if stream.Stream["has_tools"] != "true" {
+		t.Errorf("expected has_tools label 'true', got %q", stream.Stream["has_tools"])
+	}
+}
+
+func TestPush_ResponseExtendedLabels(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := map[string]interface{}{
+		"type":   "response",
+		"status": 200,
+		"body":   `{"stop_reason":"end_turn"}`,
+		"headers": map[string]interface{}{
+			"Anthropic-Ratelimit-Unified-Status": "allowed",
+		},
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+			"machine": "test@host",
+		},
+	}
+
+	exporter.Push(entry, "anthropic")
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	if stream.Stream["status_bucket"] != "2xx" {
+		t.Errorf("expected status_bucket '2xx', got %q", stream.Stream["status_bucket"])
+	}
+	if stream.Stream["stop_reason"] != "end_turn" {
+		t.Errorf("expected stop_reason 'end_turn', got %q", stream.Stream["stop_reason"])
+	}
+	if stream.Stream["ratelimit_status"] != "allowed" {
+		t.Errorf("expected ratelimit_status 'allowed', got %q", stream.Stream["ratelimit_status"])
+	}
+}
+
 func TestDoSend_ReturnsErrorOn5xx(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
