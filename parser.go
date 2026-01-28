@@ -34,12 +34,15 @@ type ContentBlock struct {
 	ToolID    string
 	ToolName  string
 	ToolInput map[string]interface{}
+	IsError   bool
 	Raw       map[string]interface{}
 }
 
 type UsageInfo struct {
-	InputTokens  int
-	OutputTokens int
+	InputTokens              int
+	OutputTokens             int
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
 }
 
 func ParseRequestBody(body string, host string) ParsedRequest {
@@ -133,6 +136,12 @@ func ParseResponseBody(body string, host string) ParsedResponse {
 		if out, ok := usage["output_tokens"].(float64); ok {
 			parsed.Usage.OutputTokens = int(out)
 		}
+		if cacheRead, ok := usage["cache_read_input_tokens"].(float64); ok {
+			parsed.Usage.CacheReadInputTokens = int(cacheRead)
+		}
+		if cacheCreate, ok := usage["cache_creation_input_tokens"].(float64); ok {
+			parsed.Usage.CacheCreationInputTokens = int(cacheCreate)
+		}
 	}
 
 	if stop, ok := raw["stop_reason"].(string); ok {
@@ -173,6 +182,12 @@ func ParseStreamingResponse(chunks []StreamChunk) ParsedResponse {
 					if usage, ok := msg["usage"].(map[string]interface{}); ok {
 						if in, ok := usage["input_tokens"].(float64); ok {
 							parsed.Usage.InputTokens = int(in)
+						}
+						if cacheRead, ok := usage["cache_read_input_tokens"].(float64); ok {
+							parsed.Usage.CacheReadInputTokens = int(cacheRead)
+						}
+						if cacheCreate, ok := usage["cache_creation_input_tokens"].(float64); ok {
+							parsed.Usage.CacheCreationInputTokens = int(cacheCreate)
 						}
 					}
 				}
@@ -293,6 +308,9 @@ func parseContentBlock(block map[string]interface{}) ContentBlock {
 		}
 		if content, ok := block["content"].(string); ok {
 			cb.Text = content
+		}
+		if isError, ok := block["is_error"].(bool); ok {
+			cb.IsError = isError
 		}
 	}
 
