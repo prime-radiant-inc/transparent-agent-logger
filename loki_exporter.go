@@ -91,6 +91,9 @@ type lokiEntry struct {
 	toolName  string // Tool name for tool_call/tool_result events
 	isRetry   string // "true" or "false" for retry detection
 	errorType string // rate_limit, context_length, invalid_request, server_error
+
+	// Request replay support
+	requestSHA string // SHA256 of raw request body for deterministic replay
 }
 
 // LokiExporter handles async batching and pushing logs to Loki
@@ -344,6 +347,14 @@ func (e *LokiExporter) Push(entry map[string]interface{}, provider string) {
 	// Extract extended labels (PRI-298)
 	model, statusBucket, stream, hasTools, stopReason, ratelimitStatus := extractExtendedLabels(entry, logType)
 
+	// Extract request SHA for replay support
+	var requestSHA string
+	if logType == "request" {
+		if sha, ok := entry["request_sha"].(string); ok {
+			requestSHA = sha
+		}
+	}
+
 	le := lokiEntry{
 		entry:           entry,
 		provider:        provider,
@@ -356,6 +367,7 @@ func (e *LokiExporter) Push(entry map[string]interface{}, provider string) {
 		hasTools:        hasTools,
 		stopReason:      stopReason,
 		ratelimitStatus: ratelimitStatus,
+		requestSHA:      requestSHA,
 	}
 
 	// Non-blocking send with drop if full

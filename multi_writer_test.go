@@ -2,6 +2,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"sync"
@@ -560,4 +562,60 @@ func TestMultiWriter_LogResponse_WithChunks(t *testing.T) {
 	if len(lokiExporter.pushCalls) != 1 {
 		t.Errorf("Expected 1 push call to Loki exporter, got %d", len(lokiExporter.pushCalls))
 	}
+}
+
+func TestMultiWriter_LogRequest_IncludesRequestSHA(t *testing.T) {
+	fileLogger := newMockFileLogger()
+	closeOrder := []string{}
+	lokiExporter := newMockLokiExporter(&closeOrder)
+
+	mw := NewMultiWriter(fileLogger, lokiExporter)
+
+	sessionID := "test-session-sha"
+	provider := "anthropic"
+	seq := 1
+	method := "POST"
+	path := "/v1/messages"
+	headers := http.Header{"Content-Type": {"application/json"}}
+	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hello"}]}`)
+	requestID := "req-sha-test"
+
+	err := mw.LogRequest(sessionID, provider, seq, method, path, headers, body, requestID)
+	if err != nil {
+		t.Fatalf("LogRequest returned error: %v", err)
+	}
+
+	// Verify Loki entry includes request_sha
+	if len(lokiExporter.pushCalls) != 1 {
+		t.Fatalf("Expected 1 push call to Loki exporter, got %d", len(lokiExporter.pushCalls))
+	}
+
+	entry := lokiExporter.pushCalls[0].entry
+	sha, ok := entry["request_sha"].(string)
+	if !ok || sha == "" {
+		t.Fatal("Expected request_sha in Loki entry")
+	}
+
+	// SHA should be 64 hex characters (SHA256)
+	if len(sha) != 64 {
+		t.Errorf("Expected 64-char hex SHA, got %d chars: %s", len(sha), sha)
+	}
+
+	// Verify we can round-trip: extract body, compute SHA, compare
+	bodyFromEntry, ok := entry["body"].(string)
+	if !ok {
+		t.Fatal("Expected body in Loki entry")
+	}
+
+	// Compute SHA of extracted body and verify it matches
+	expectedSHA := computeSHA256([]byte(bodyFromEntry))
+	if sha != expectedSHA {
+		t.Errorf("SHA mismatch: entry has %s, computed %s", sha, expectedSHA)
+	}
+}
+
+// computeSHA256 computes the hex-encoded SHA256 of data
+func computeSHA256(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }

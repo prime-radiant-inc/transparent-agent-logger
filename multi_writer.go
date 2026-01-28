@@ -2,6 +2,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"os"
@@ -104,14 +106,19 @@ func (m *MultiWriter) LogRequest(sessionID, provider string, seq int, method, pa
 	err := m.file.LogRequest(sessionID, provider, seq, method, path, headers, body, requestID)
 
 	if m.loki != nil {
+		// Compute SHA256 of raw request body for deterministic replay verification
+		bodyHash := sha256.Sum256(body)
+		bodySHA := hex.EncodeToString(bodyHash[:])
+
 		entry := map[string]interface{}{
-			"type":    "request",
-			"seq":     seq,
-			"method":  method,
-			"path":    path,
-			"headers": ObfuscateHeaders(headers),
-			"body":    string(body),
-			"size":    len(body),
+			"type":        "request",
+			"seq":         seq,
+			"method":      method,
+			"path":        path,
+			"headers":     ObfuscateHeaders(headers),
+			"body":        string(body),
+			"size":        len(body),
+			"request_sha": bodySHA,
 			"_meta": map[string]interface{}{
 				"ts":         time.Now().UTC().Format(time.RFC3339Nano),
 				"machine":    m.machineID,
