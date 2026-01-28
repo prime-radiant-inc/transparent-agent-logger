@@ -14,6 +14,30 @@ import (
 	"time"
 )
 
+// Log type constants for agent observability events (PRI-343)
+const (
+	LogTypeTurnStart  = "turn_start"
+	LogTypeTurnEnd    = "turn_end"
+	LogTypeToolCall   = "tool_call"
+	LogTypeToolResult = "tool_result"
+)
+
+// PatternData holds agent behavior pattern metrics for JSON body (not labels)
+type PatternData struct {
+	TurnDepth        int `json:"turn_depth"`
+	ToolStreak       int `json:"tool_streak"`
+	RetryCount       int `json:"retry_count"`
+	SessionToolCount int `json:"session_tool_count"`
+}
+
+// TokenData holds token usage metrics for JSON body (not labels)
+type TokenData struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
 // LokiExporterConfig holds configuration for the Loki exporter
 type LokiExporterConfig struct {
 	URL             string        // Full push endpoint URL
@@ -56,12 +80,17 @@ type lokiEntry struct {
 	machine   string
 
 	// Extended labels for richer querying (PRI-298)
-	model          string // LLM model name (e.g., "claude-sonnet-4-20250514")
-	statusBucket   string // HTTP status bucket: "2xx", "4xx", "5xx", or empty
-	stream         string // "true" or "false" for streaming requests
-	hasTools       string // "true" or "false" if request includes tools
-	stopReason     string // Response stop reason (e.g., "end_turn", "max_tokens")
+	model           string // LLM model name (e.g., "claude-sonnet-4-20250514")
+	statusBucket    string // HTTP status bucket: "2xx", "4xx", "5xx", or empty
+	stream          string // "true" or "false" for streaming requests
+	hasTools        string // "true" or "false" if request includes tools
+	stopReason      string // Response stop reason (e.g., "end_turn", "max_tokens")
 	ratelimitStatus string // Rate limit status from response headers
+
+	// Agent observability labels (PRI-343)
+	toolName  string // Tool name for tool_call/tool_result events
+	isRetry   string // "true" or "false" for retry detection
+	errorType string // rate_limit, context_length, invalid_request, server_error
 }
 
 // LokiExporter handles async batching and pushing logs to Loki
@@ -423,8 +452,19 @@ func (e *LokiExporter) sendBatch(entries []lokiEntry) {
 			labels["ratelimit_status"] = entry.ratelimitStatus
 		}
 
+		// Add agent observability labels (PRI-343)
+		if entry.toolName != "" {
+			labels["tool_name"] = entry.toolName
+		}
+		if entry.isRetry != "" {
+			labels["is_retry"] = entry.isRetry
+		}
+		if entry.errorType != "" {
+			labels["error_type"] = entry.errorType
+		}
+
 		// Create label key for grouping (include all labels for proper stream separation)
-		labelKey := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+		labelKey := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
 			labels["app"],
 			labels["provider"],
 			labels["environment"],
@@ -436,6 +476,9 @@ func (e *LokiExporter) sendBatch(entries []lokiEntry) {
 			entry.hasTools,
 			entry.stopReason,
 			entry.ratelimitStatus,
+			entry.toolName,
+			entry.isRetry,
+			entry.errorType,
 		)
 
 		// Get or create stream for this label set
@@ -585,4 +628,159 @@ func (e *LokiExporter) forceClose() {
 	e.closeOnce.Do(func() {
 		close(e.closeChan)
 	})
+}
+
+// classifyErrorType categorizes HTTP error responses into low-cardinality error types.
+// Returns empty string for success responses (2xx).
+func classifyErrorType(statusCode int, responseBody string) string {
+	if statusCode >= 200 && statusCode < 300 {
+		return ""
+	}
+	if statusCode == 429 {
+		return "rate_limit"
+	}
+	if statusCode >= 500 {
+		return "server_error"
+	}
+	if statusCode == 400 {
+		// Check if context length error by looking for common patterns
+		bodyLower := strings.ToLower(responseBody)
+		if strings.Contains(bodyLower, "context") || strings.Contains(bodyLower, "too long") {
+			return "context_length"
+		}
+		return "invalid_request"
+	}
+	// Other 4xx errors
+	if statusCode >= 400 && statusCode < 500 {
+		return "invalid_request"
+	}
+	return ""
+}
+
+// emitEvent is the internal method for pushing structured events to Loki.
+// It constructs the entry with proper labels and JSON body, then queues it.
+func (e *LokiExporter) emitEvent(sessionID, provider, machine, logType string, labels map[string]string, body map[string]interface{}) {
+	timestamp := time.Now()
+
+	// Build base labels
+	baseLabels := map[string]string{
+		"app":         "llm-proxy",
+		"provider":    provider,
+		"environment": e.config.Environment,
+		"machine":     machine,
+		"log_type":    logType,
+	}
+
+	// Merge additional labels
+	for k, v := range labels {
+		if v != "" {
+			baseLabels[k] = v
+		}
+	}
+
+	// Add session_id to body (high cardinality, not label)
+	body["session_id"] = sessionID
+
+	// Create entry for channel
+	entry := lokiEntry{
+		entry:     body,
+		provider:  provider,
+		timestamp: timestamp,
+		logType:   logType,
+		machine:   machine,
+	}
+
+	// Copy additional labels to lokiEntry fields
+	if sr, ok := labels["stop_reason"]; ok {
+		entry.stopReason = sr
+	}
+	if tn, ok := labels["tool_name"]; ok {
+		entry.toolName = tn
+	}
+	if ir, ok := labels["is_retry"]; ok {
+		entry.isRetry = ir
+	}
+	if et, ok := labels["error_type"]; ok {
+		entry.errorType = et
+	}
+
+	// Build a complete entry map with type for JSON serialization
+	body["type"] = logType
+
+	// Non-blocking send
+	select {
+	case e.entryChan <- entry:
+		// Entry queued
+	default:
+		atomic.AddInt64(&e.entriesDropped, 1)
+	}
+}
+
+// EmitTurnStart emits a turn_start event when a request is received.
+func (e *LokiExporter) EmitTurnStart(sessionID, provider, machine string, turnDepth int, errorRecovered bool) {
+	labels := map[string]string{}
+
+	body := map[string]interface{}{
+		"turn_depth":      turnDepth,
+		"error_recovered": errorRecovered,
+	}
+
+	e.emitEvent(sessionID, provider, machine, LogTypeTurnStart, labels, body)
+}
+
+// EmitTurnEnd emits a turn_end event when a response is complete.
+func (e *LokiExporter) EmitTurnEnd(sessionID, provider, machine, stopReason string, isRetry bool, errorType string, patterns PatternData, tokens TokenData) {
+	isRetryStr := "false"
+	if isRetry {
+		isRetryStr = "true"
+	}
+
+	labels := map[string]string{
+		"stop_reason": stopReason,
+		"is_retry":    isRetryStr,
+	}
+	if errorType != "" {
+		labels["error_type"] = errorType
+	}
+
+	body := map[string]interface{}{
+		"turn_depth":                   patterns.TurnDepth,
+		"tool_streak":                  patterns.ToolStreak,
+		"retry_count":                  patterns.RetryCount,
+		"session_tool_count":           patterns.SessionToolCount,
+		"input_tokens":                 tokens.InputTokens,
+		"output_tokens":                tokens.OutputTokens,
+		"cache_read_input_tokens":      tokens.CacheReadInputTokens,
+		"cache_creation_input_tokens":  tokens.CacheCreationInputTokens,
+	}
+
+	e.emitEvent(sessionID, provider, machine, LogTypeTurnEnd, labels, body)
+}
+
+// EmitToolCall emits a tool_call event for each tool_use in a response.
+func (e *LokiExporter) EmitToolCall(sessionID, provider, machine, toolName string, toolIndex int, toolUseID string) {
+	labels := map[string]string{
+		"tool_name": toolName,
+	}
+
+	body := map[string]interface{}{
+		"tool_index":  toolIndex,
+		"tool_use_id": toolUseID,
+	}
+
+	e.emitEvent(sessionID, provider, machine, LogTypeToolCall, labels, body)
+}
+
+// EmitToolResult emits a tool_result event for each tool_result in a request.
+func (e *LokiExporter) EmitToolResult(sessionID, provider, machine, toolName, toolUseID string, isError bool) {
+	labels := map[string]string{
+		"tool_name": toolName,
+	}
+
+	body := map[string]interface{}{
+		"tool_use_id": toolUseID,
+		"is_error":    isError,
+	}
+
+	e.emitEvent(sessionID, provider, machine, LogTypeToolResult, labels, body)
 }

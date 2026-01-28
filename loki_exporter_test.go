@@ -1331,3 +1331,550 @@ func TestNonBlockingPush(t *testing.T) {
 	// Close without waiting (force close)
 	exporter.forceClose()
 }
+
+// Tests for Agent Observability Event Infrastructure (PRI-343)
+
+func TestLogTypeConstants(t *testing.T) {
+	// Verify log type constants are defined with expected values
+	if LogTypeTurnStart != "turn_start" {
+		t.Errorf("expected LogTypeTurnStart='turn_start', got %q", LogTypeTurnStart)
+	}
+	if LogTypeTurnEnd != "turn_end" {
+		t.Errorf("expected LogTypeTurnEnd='turn_end', got %q", LogTypeTurnEnd)
+	}
+	if LogTypeToolCall != "tool_call" {
+		t.Errorf("expected LogTypeToolCall='tool_call', got %q", LogTypeToolCall)
+	}
+	if LogTypeToolResult != "tool_result" {
+		t.Errorf("expected LogTypeToolResult='tool_result', got %q", LogTypeToolResult)
+	}
+}
+
+func TestClassifyErrorType(t *testing.T) {
+	tests := []struct {
+		name         string
+		statusCode   int
+		responseBody string
+		want         string
+	}{
+		{"rate_limit_429", 429, "", "rate_limit"},
+		{"context_length_400", 400, `{"error": {"message": "context length exceeded"}}`, "context_length"},
+		{"context_length_400_alt", 400, `{"error": {"message": "prompt is too long"}}`, "context_length"},
+		{"invalid_request_400", 400, `{"error": {"message": "invalid model"}}`, "invalid_request"},
+		{"server_error_500", 500, "", "server_error"},
+		{"server_error_502", 502, "", "server_error"},
+		{"server_error_503", 503, "", "server_error"},
+		{"success_200", 200, "", ""},
+		{"success_201", 201, "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyErrorType(tt.statusCode, tt.responseBody)
+			if got != tt.want {
+				t.Errorf("classifyErrorType(%d, %q) = %q, want %q", tt.statusCode, tt.responseBody, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPatternDataStruct(t *testing.T) {
+	// Test that PatternData struct has expected fields and marshals correctly
+	pd := PatternData{
+		TurnDepth:        5,
+		ToolStreak:       3,
+		RetryCount:       2,
+		SessionToolCount: 10,
+	}
+
+	data, err := json.Marshal(pd)
+	if err != nil {
+		t.Fatalf("failed to marshal PatternData: %v", err)
+	}
+
+	var unmarshaled map[string]interface{}
+	if err := json.Unmarshal(data, &unmarshaled); err != nil {
+		t.Fatalf("failed to unmarshal PatternData: %v", err)
+	}
+
+	// Verify JSON field names
+	if v, ok := unmarshaled["turn_depth"].(float64); !ok || int(v) != 5 {
+		t.Errorf("expected turn_depth=5, got %v", unmarshaled["turn_depth"])
+	}
+	if v, ok := unmarshaled["tool_streak"].(float64); !ok || int(v) != 3 {
+		t.Errorf("expected tool_streak=3, got %v", unmarshaled["tool_streak"])
+	}
+	if v, ok := unmarshaled["retry_count"].(float64); !ok || int(v) != 2 {
+		t.Errorf("expected retry_count=2, got %v", unmarshaled["retry_count"])
+	}
+	if v, ok := unmarshaled["session_tool_count"].(float64); !ok || int(v) != 10 {
+		t.Errorf("expected session_tool_count=10, got %v", unmarshaled["session_tool_count"])
+	}
+}
+
+func TestTokenDataStruct(t *testing.T) {
+	// Test that TokenData struct has expected fields and marshals correctly
+	td := TokenData{
+		InputTokens:              100,
+		OutputTokens:             50,
+		CacheReadInputTokens:     80,
+		CacheCreationInputTokens: 20,
+	}
+
+	data, err := json.Marshal(td)
+	if err != nil {
+		t.Fatalf("failed to marshal TokenData: %v", err)
+	}
+
+	var unmarshaled map[string]interface{}
+	if err := json.Unmarshal(data, &unmarshaled); err != nil {
+		t.Fatalf("failed to unmarshal TokenData: %v", err)
+	}
+
+	// Verify JSON field names match spec
+	if v, ok := unmarshaled["input_tokens"].(float64); !ok || int(v) != 100 {
+		t.Errorf("expected input_tokens=100, got %v", unmarshaled["input_tokens"])
+	}
+	if v, ok := unmarshaled["output_tokens"].(float64); !ok || int(v) != 50 {
+		t.Errorf("expected output_tokens=50, got %v", unmarshaled["output_tokens"])
+	}
+	if v, ok := unmarshaled["cache_read_input_tokens"].(float64); !ok || int(v) != 80 {
+		t.Errorf("expected cache_read_input_tokens=80, got %v", unmarshaled["cache_read_input_tokens"])
+	}
+	if v, ok := unmarshaled["cache_creation_input_tokens"].(float64); !ok || int(v) != 20 {
+		t.Errorf("expected cache_creation_input_tokens=20, got %v", unmarshaled["cache_creation_input_tokens"])
+	}
+}
+
+func TestEmitTurnStart(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	exporter.EmitTurnStart("test-session", "anthropic", "test@host", 5, true)
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	// Verify log_type label
+	if stream.Stream["log_type"] != "turn_start" {
+		t.Errorf("expected log_type 'turn_start', got %q", stream.Stream["log_type"])
+	}
+
+	// Parse JSON body
+	if len(stream.Values) == 0 || len(stream.Values[0]) < 2 {
+		t.Fatal("expected values with log line")
+	}
+
+	var logBody map[string]interface{}
+	if err := json.Unmarshal([]byte(stream.Values[0][1]), &logBody); err != nil {
+		t.Fatalf("failed to parse log body: %v", err)
+	}
+
+	// Verify JSON body fields
+	if v, ok := logBody["turn_depth"].(float64); !ok || int(v) != 5 {
+		t.Errorf("expected turn_depth=5, got %v", logBody["turn_depth"])
+	}
+	if v, ok := logBody["error_recovered"].(bool); !ok || !v {
+		t.Errorf("expected error_recovered=true, got %v", logBody["error_recovered"])
+	}
+}
+
+func TestEmitTurnEnd(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	patterns := PatternData{
+		TurnDepth:        3,
+		ToolStreak:       2,
+		RetryCount:       1,
+		SessionToolCount: 7,
+	}
+	tokens := TokenData{
+		InputTokens:              1000,
+		OutputTokens:             500,
+		CacheReadInputTokens:     800,
+		CacheCreationInputTokens: 200,
+	}
+
+	exporter.EmitTurnEnd("test-session", "anthropic", "test@host", "end_turn", false, "", patterns, tokens)
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	// Verify labels
+	if stream.Stream["log_type"] != "turn_end" {
+		t.Errorf("expected log_type 'turn_end', got %q", stream.Stream["log_type"])
+	}
+	if stream.Stream["stop_reason"] != "end_turn" {
+		t.Errorf("expected stop_reason 'end_turn', got %q", stream.Stream["stop_reason"])
+	}
+	if stream.Stream["is_retry"] != "false" {
+		t.Errorf("expected is_retry 'false', got %q", stream.Stream["is_retry"])
+	}
+
+	// Parse JSON body
+	var logBody map[string]interface{}
+	if err := json.Unmarshal([]byte(stream.Values[0][1]), &logBody); err != nil {
+		t.Fatalf("failed to parse log body: %v", err)
+	}
+
+	// Verify pattern data in body
+	if v, ok := logBody["turn_depth"].(float64); !ok || int(v) != 3 {
+		t.Errorf("expected turn_depth=3, got %v", logBody["turn_depth"])
+	}
+	if v, ok := logBody["tool_streak"].(float64); !ok || int(v) != 2 {
+		t.Errorf("expected tool_streak=2, got %v", logBody["tool_streak"])
+	}
+	if v, ok := logBody["retry_count"].(float64); !ok || int(v) != 1 {
+		t.Errorf("expected retry_count=1, got %v", logBody["retry_count"])
+	}
+	if v, ok := logBody["session_tool_count"].(float64); !ok || int(v) != 7 {
+		t.Errorf("expected session_tool_count=7, got %v", logBody["session_tool_count"])
+	}
+
+	// Verify token data in body
+	if v, ok := logBody["input_tokens"].(float64); !ok || int(v) != 1000 {
+		t.Errorf("expected input_tokens=1000, got %v", logBody["input_tokens"])
+	}
+	if v, ok := logBody["output_tokens"].(float64); !ok || int(v) != 500 {
+		t.Errorf("expected output_tokens=500, got %v", logBody["output_tokens"])
+	}
+	if v, ok := logBody["cache_read_input_tokens"].(float64); !ok || int(v) != 800 {
+		t.Errorf("expected cache_read_input_tokens=800, got %v", logBody["cache_read_input_tokens"])
+	}
+	if v, ok := logBody["cache_creation_input_tokens"].(float64); !ok || int(v) != 200 {
+		t.Errorf("expected cache_creation_input_tokens=200, got %v", logBody["cache_creation_input_tokens"])
+	}
+}
+
+func TestEmitTurnEnd_WithRetryAndErrorType(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	patterns := PatternData{TurnDepth: 2}
+	tokens := TokenData{}
+
+	exporter.EmitTurnEnd("test-session", "anthropic", "test@host", "error", true, "rate_limit", patterns, tokens)
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	// Verify retry and error labels
+	if stream.Stream["is_retry"] != "true" {
+		t.Errorf("expected is_retry 'true', got %q", stream.Stream["is_retry"])
+	}
+	if stream.Stream["error_type"] != "rate_limit" {
+		t.Errorf("expected error_type 'rate_limit', got %q", stream.Stream["error_type"])
+	}
+}
+
+func TestEmitToolCall(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	exporter.EmitToolCall("test-session", "anthropic", "test@host", "Bash", 2, "toolu_01abc")
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	// Verify labels
+	if stream.Stream["log_type"] != "tool_call" {
+		t.Errorf("expected log_type 'tool_call', got %q", stream.Stream["log_type"])
+	}
+	if stream.Stream["tool_name"] != "Bash" {
+		t.Errorf("expected tool_name 'Bash', got %q", stream.Stream["tool_name"])
+	}
+
+	// Parse JSON body
+	var logBody map[string]interface{}
+	if err := json.Unmarshal([]byte(stream.Values[0][1]), &logBody); err != nil {
+		t.Fatalf("failed to parse log body: %v", err)
+	}
+
+	// Verify tool_index and tool_use_id in body (not labels - high cardinality)
+	if v, ok := logBody["tool_index"].(float64); !ok || int(v) != 2 {
+		t.Errorf("expected tool_index=2, got %v", logBody["tool_index"])
+	}
+	if v, ok := logBody["tool_use_id"].(string); !ok || v != "toolu_01abc" {
+		t.Errorf("expected tool_use_id='toolu_01abc', got %v", logBody["tool_use_id"])
+	}
+}
+
+func TestEmitToolResult(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	exporter.EmitToolResult("test-session", "anthropic", "test@host", "Read", "toolu_01xyz", true)
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	// Verify labels
+	if stream.Stream["log_type"] != "tool_result" {
+		t.Errorf("expected log_type 'tool_result', got %q", stream.Stream["log_type"])
+	}
+	if stream.Stream["tool_name"] != "Read" {
+		t.Errorf("expected tool_name 'Read', got %q", stream.Stream["tool_name"])
+	}
+
+	// Parse JSON body
+	var logBody map[string]interface{}
+	if err := json.Unmarshal([]byte(stream.Values[0][1]), &logBody); err != nil {
+		t.Fatalf("failed to parse log body: %v", err)
+	}
+
+	// Verify is_error and tool_use_id in body
+	if v, ok := logBody["is_error"].(bool); !ok || !v {
+		t.Errorf("expected is_error=true, got %v", logBody["is_error"])
+	}
+	if v, ok := logBody["tool_use_id"].(string); !ok || v != "toolu_01xyz" {
+		t.Errorf("expected tool_use_id='toolu_01xyz', got %v", logBody["tool_use_id"])
+	}
+}
+
+func TestEmitToolResult_NoError(t *testing.T) {
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:         server.URL,
+		BatchSize:   1,
+		BatchWait:   time.Hour,
+		UseGzip:     false,
+		Environment: "test",
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	exporter.EmitToolResult("test-session", "anthropic", "test@host", "Bash", "toolu_02abc", false)
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	// Parse JSON body
+	var logBody map[string]interface{}
+	if err := json.Unmarshal([]byte(receivedPayload.Streams[0].Values[0][1]), &logBody); err != nil {
+		t.Fatalf("failed to parse log body: %v", err)
+	}
+
+	// Verify is_error is false
+	if v, ok := logBody["is_error"].(bool); !ok || v {
+		t.Errorf("expected is_error=false, got %v", logBody["is_error"])
+	}
+}
+
+func TestEmitEvent_NumericValuesInBodyNotLabels(t *testing.T) {
+	// Verify that numeric values (turn_depth, tool_index, tokens) go in JSON body, not labels
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:       server.URL,
+		BatchSize: 1,
+		BatchWait: time.Hour,
+		UseGzip:   false,
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	patterns := PatternData{TurnDepth: 10, ToolStreak: 5}
+	tokens := TokenData{InputTokens: 1000}
+	exporter.EmitTurnEnd("test-session", "anthropic", "test@host", "end_turn", false, "", patterns, tokens)
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	stream := receivedPayload.Streams[0]
+
+	// Numeric values should NOT be in labels
+	forbiddenLabels := []string{"turn_depth", "tool_streak", "retry_count", "session_tool_count",
+		"tool_index", "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"}
+	for _, label := range forbiddenLabels {
+		if _, exists := stream.Stream[label]; exists {
+			t.Errorf("numeric value %q should not be in labels", label)
+		}
+	}
+}
+
+func TestEmitEvent_ToolUseIDInBodyNotLabels(t *testing.T) {
+	// tool_use_id is high cardinality - must be in JSON body, not labels
+	var receivedPayload LokiPushRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := LokiExporterConfig{
+		URL:       server.URL,
+		BatchSize: 1,
+		BatchWait: time.Hour,
+		UseGzip:   false,
+	}
+
+	exporter, err := NewLokiExporter(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	exporter.EmitToolCall("test-session", "anthropic", "test@host", "Bash", 0, "toolu_unique123")
+
+	time.Sleep(100 * time.Millisecond)
+	exporter.Close()
+
+	stream := receivedPayload.Streams[0]
+
+	// tool_use_id should NOT be in labels (high cardinality)
+	if _, exists := stream.Stream["tool_use_id"]; exists {
+		t.Error("tool_use_id should not be in labels (high cardinality)")
+	}
+}
