@@ -30,6 +30,7 @@ type Proxy struct {
 	sessionManager *SessionManager
 	eventEmitter   AgentEventEmitter
 	machineID      string
+	bedrock        *bedrockState
 }
 
 // createPassthroughClient creates an HTTP client configured for true passthrough proxying
