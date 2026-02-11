@@ -1878,3 +1878,55 @@ func TestEmitEvent_ToolUseIDInBodyNotLabels(t *testing.T) {
 		t.Error("tool_use_id should not be in labels (high cardinality)")
 	}
 }
+
+func TestFindStopReasonInChunks_WithSSEPrefix(t *testing.T) {
+	// Chunks stored in StreamChunk.Raw have "data: " prefix from SSE parsing.
+	// findStopReasonInChunks must strip this prefix before JSON unmarshal.
+	chunks := []string{
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		`data: [DONE]`,
+	}
+
+	got := findStopReasonInChunks(chunks)
+	if got != "end_turn" {
+		t.Errorf("findStopReasonInChunks() = %q, want %q", got, "end_turn")
+	}
+}
+
+func TestFindStopReasonInChunks_WithoutPrefix(t *testing.T) {
+	// Raw JSON without SSE prefix should also work
+	chunks := []string{
+		`{"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":100}}`,
+	}
+
+	got := findStopReasonInChunks(chunks)
+	if got != "max_tokens" {
+		t.Errorf("findStopReasonInChunks() = %q, want %q", got, "max_tokens")
+	}
+}
+
+func TestFindStopReasonInChunks_EmptyChunks(t *testing.T) {
+	got := findStopReasonInChunks(nil)
+	if got != "" {
+		t.Errorf("findStopReasonInChunks(nil) = %q, want empty", got)
+	}
+
+	got = findStopReasonInChunks([]string{})
+	if got != "" {
+		t.Errorf("findStopReasonInChunks([]) = %q, want empty", got)
+	}
+}
+
+func TestFindStopReasonInChunks_NoMessageDelta(t *testing.T) {
+	chunks := []string{
+		`data: {"type":"content_block_start","content_block":{"type":"text","text":""}}`,
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+	}
+
+	got := findStopReasonInChunks(chunks)
+	if got != "" {
+		t.Errorf("findStopReasonInChunks() = %q, want empty (no message_delta)", got)
+	}
+}

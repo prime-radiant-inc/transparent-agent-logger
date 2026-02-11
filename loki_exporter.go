@@ -296,11 +296,19 @@ func extractChunkRawData(chunks interface{}) []string {
 	return nil
 }
 
-// findStopReasonInChunks searches chunks (from end) for a message_delta event with stop_reason
+// findStopReasonInChunks searches chunks (from end) for a message_delta event with stop_reason.
+// Chunks may have an SSE "data: " prefix which must be stripped before JSON parsing.
 func findStopReasonInChunks(chunkData []string) string {
 	for i := len(chunkData) - 1; i >= 0; i-- {
+		raw := chunkData[i]
+		// Strip SSE "data: " prefix — chunks store raw SSE lines
+		raw = strings.TrimPrefix(raw, "data: ")
+		raw = strings.TrimSpace(raw)
+		if raw == "" || raw == "[DONE]" {
+			continue
+		}
 		var event map[string]interface{}
-		if err := json.Unmarshal([]byte(chunkData[i]), &event); err != nil {
+		if err := json.Unmarshal([]byte(raw), &event); err != nil {
 			continue
 		}
 		if event["type"] != "message_delta" {
