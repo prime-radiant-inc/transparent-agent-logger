@@ -129,6 +129,49 @@ export ANTHROPIC_BASE_URL=http://localhost:8080/anthropic/api.anthropic.com
 export OPENAI_BASE_URL=http://localhost:8080/openai/api.openai.com
 ```
 
+## AWS Bedrock Mode
+
+llm-proxy can act as a signing proxy for [AWS Bedrock](https://aws.amazon.com/bedrock/), allowing Claude Code to use Bedrock without managing AWS credentials directly. The proxy receives unsigned Bedrock-format requests, SigV4-signs them, forwards to Bedrock, and decodes the binary eventstream responses for logging while streaming raw bytes back to the client.
+
+### Setup
+
+Set `BEDROCK_REGION` when starting the proxy:
+
+```bash
+BEDROCK_REGION=us-west-2 llm-proxy --port 9999
+```
+
+The proxy uses the standard AWS SDK credential chain (`~/.aws/credentials`, env vars, instance role, etc.). Your credentials need `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` permissions.
+
+### Configuring Claude Code
+
+Point Claude Code at the proxy instead of real Bedrock:
+
+```bash
+export CLAUDE_CODE_USE_BEDROCK=1
+export ANTHROPIC_BEDROCK_BASE_URL=http://localhost:9999
+export CLAUDE_CODE_SKIP_BEDROCK_AUTH=1
+claude
+```
+
+`CLAUDE_CODE_SKIP_BEDROCK_AUTH=1` tells Claude Code to skip its own SigV4 signing since the proxy handles it.
+
+### Health Check
+
+```bash
+curl http://localhost:9999/health/bedrock
+# {"status":"ok","region":"us-west-2","decode_errors":0}
+```
+
+### How It Works
+
+1. Claude Code sends Bedrock-format requests (binary eventstream) to the proxy
+2. The proxy extracts the model ID from the URL path, validates it, and SigV4-signs the request
+3. The response is streamed back to Claude Code as raw bytes (no transformation)
+4. A TeeReader captures the stream for decoding — eventstream frames are parsed, base64-decoded, and fed through the normal logging pipeline (file, Loki, session tracking)
+
+All existing features (session tracking, fingerprinting, Loki export, log explorer) work with Bedrock traffic. Bedrock entries get a `transport=bedrock` label in Loki to distinguish them from direct API traffic.
+
 ## Log Explorer
 
 Browse and search your LLM logs with a web UI:

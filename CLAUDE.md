@@ -111,6 +111,7 @@ Sessions are tracked via `client_session_id` extracted from request bodies (e.g.
 | `LLM_PROXY_LOKI_RETRY_MAX` | Max retry attempts (default: 5) |
 | `LLM_PROXY_LOKI_USE_GZIP` | Enable gzip compression (`true` or `1`, default: true) |
 | `LLM_PROXY_LOKI_ENVIRONMENT` | Environment label for Grafana filtering |
+| `BEDROCK_REGION` | AWS region for Bedrock (e.g., `us-west-2`). Enables Bedrock signing proxy mode |
 
 ## File Locations
 
