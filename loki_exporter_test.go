@@ -1930,3 +1930,172 @@ func TestFindStopReasonInChunks_NoMessageDelta(t *testing.T) {
 		t.Errorf("findStopReasonInChunks() = %q, want empty (no message_delta)", got)
 	}
 }
+
+func TestLokiExporter_TransportLabel(t *testing.T) {
+	var receivedPayload LokiPushRequest
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	exporter, err := NewLokiExporter(LokiExporterConfig{
+		URL:       server.URL,
+		BatchSize: 1,
+		BatchWait: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewLokiExporter: %v", err)
+	}
+
+	// Push with transport=bedrock via _meta
+	entry := map[string]interface{}{
+		"type": "request",
+		"body": `{"max_tokens":100,"messages":[{"role":"user","content":"hi"}]}`,
+		"_meta": map[string]interface{}{
+			"ts":             time.Now().Format(time.RFC3339Nano),
+			"machine":        "test-machine",
+			"transport":      "bedrock",
+			"model_override": "us.anthropic.claude-sonnet-4-5-20250929-v2:0",
+		},
+	}
+	exporter.Push(entry, "anthropic")
+
+	time.Sleep(200 * time.Millisecond)
+	exporter.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	// transport label should be "bedrock"
+	if stream.Stream["transport"] != "bedrock" {
+		t.Errorf("transport = %q, want 'bedrock'", stream.Stream["transport"])
+	}
+
+	// model should come from model_override, not body
+	if stream.Stream["model"] != "us.anthropic.claude-sonnet-4-5-20250929-v2:0" {
+		t.Errorf("model = %q, want 'us.anthropic.claude-sonnet-4-5-20250929-v2:0'", stream.Stream["model"])
+	}
+
+	// provider should still be anthropic
+	if stream.Stream["provider"] != "anthropic" {
+		t.Errorf("provider = %q, want 'anthropic'", stream.Stream["provider"])
+	}
+}
+
+func TestLokiExporter_TransportDefaultDirect(t *testing.T) {
+	var receivedPayload LokiPushRequest
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	exporter, err := NewLokiExporter(LokiExporterConfig{
+		URL:       server.URL,
+		BatchSize: 1,
+		BatchWait: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewLokiExporter: %v", err)
+	}
+
+	// Push without _meta.transport — should default to "direct"
+	entry := map[string]interface{}{
+		"type": "request",
+		"body": `{"model":"claude-sonnet-4-20250514","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}`,
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().Format(time.RFC3339Nano),
+			"machine": "test-machine",
+		},
+	}
+	exporter.Push(entry, "anthropic")
+
+	time.Sleep(200 * time.Millisecond)
+	exporter.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(receivedPayload.Streams) == 0 {
+		t.Fatal("expected at least one stream")
+	}
+
+	stream := receivedPayload.Streams[0]
+
+	if stream.Stream["transport"] != "direct" {
+		t.Errorf("transport = %q, want 'direct' (default)", stream.Stream["transport"])
+	}
+}
+
+func TestLokiExporter_DifferentTransportsSeparateStreams(t *testing.T) {
+	var receivedPayload LokiPushRequest
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedPayload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	exporter, err := NewLokiExporter(LokiExporterConfig{
+		URL:       server.URL,
+		BatchSize: 10,
+		BatchWait: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewLokiExporter: %v", err)
+	}
+
+	// Push one "direct" and one "bedrock" entry
+	directEntry := map[string]interface{}{
+		"type": "request",
+		"body": `{"model":"claude-sonnet-4-20250514","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}`,
+		"_meta": map[string]interface{}{
+			"ts":      time.Now().Format(time.RFC3339Nano),
+			"machine": "test-machine",
+		},
+	}
+	bedrockEntry := map[string]interface{}{
+		"type": "request",
+		"body": `{"max_tokens":100,"messages":[{"role":"user","content":"hi"}]}`,
+		"_meta": map[string]interface{}{
+			"ts":             time.Now().Format(time.RFC3339Nano),
+			"machine":        "test-machine",
+			"transport":      "bedrock",
+			"model_override": "us.anthropic.claude-sonnet-4-5-20250929-v2:0",
+		},
+	}
+	exporter.Push(directEntry, "anthropic")
+	exporter.Push(bedrockEntry, "anthropic")
+
+	time.Sleep(200 * time.Millisecond)
+	exporter.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Should have 2 separate streams due to different transport values
+	if len(receivedPayload.Streams) < 2 {
+		t.Errorf("expected 2 streams (different transports), got %d", len(receivedPayload.Streams))
+	}
+}

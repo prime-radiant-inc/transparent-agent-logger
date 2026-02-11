@@ -94,6 +94,10 @@ type lokiEntry struct {
 
 	// Request replay support
 	requestSHA string // SHA256 of raw request body for deterministic replay
+
+	// Transport label distinguishes Bedrock vs direct API traffic (PRI-28)
+	transport     string // "direct" or "bedrock"
+	modelOverride string // Caller-injected model ID (Bedrock: from URL path, not body)
 }
 
 // LokiExporter handles async batching and pushing logs to Loki
@@ -355,6 +359,23 @@ func (e *LokiExporter) Push(entry map[string]interface{}, provider string) {
 	// Extract extended labels (PRI-298)
 	model, statusBucket, stream, hasTools, stopReason, ratelimitStatus := extractExtendedLabels(entry, logType)
 
+	// Extract transport and modelOverride from _meta (PRI-28)
+	transport := "direct"
+	var modelOverride string
+	if meta, ok := entry["_meta"].(map[string]interface{}); ok {
+		if t, ok := meta["transport"].(string); ok && t != "" {
+			transport = t
+		}
+		if mo, ok := meta["model_override"].(string); ok && mo != "" {
+			modelOverride = mo
+		}
+	}
+
+	// modelOverride takes precedence over body-parsed model
+	if modelOverride != "" {
+		model = modelOverride
+	}
+
 	// Extract request SHA for replay support
 	var requestSHA string
 	if logType == "request" {
@@ -376,6 +397,8 @@ func (e *LokiExporter) Push(entry map[string]interface{}, provider string) {
 		stopReason:      stopReason,
 		ratelimitStatus: ratelimitStatus,
 		requestSHA:      requestSHA,
+		transport:       transport,
+		modelOverride:   modelOverride,
 	}
 
 	// Non-blocking send with drop if full
@@ -483,8 +506,13 @@ func (e *LokiExporter) sendBatch(entries []lokiEntry) {
 			labels["error_type"] = entry.errorType
 		}
 
+		// Transport label distinguishes Bedrock vs direct API traffic (PRI-28)
+		if entry.transport != "" {
+			labels["transport"] = entry.transport
+		}
+
 		// Create label key for grouping (include all labels for proper stream separation)
-		labelKey := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+		labelKey := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
 			labels["app"],
 			labels["provider"],
 			labels["environment"],
@@ -499,6 +527,7 @@ func (e *LokiExporter) sendBatch(entries []lokiEntry) {
 			entry.toolName,
 			entry.isRetry,
 			entry.errorType,
+			entry.transport,
 		)
 
 		// Get or create stream for this label set
