@@ -95,7 +95,7 @@ type lokiEntry struct {
 	// Request replay support
 	requestSHA string // SHA256 of raw request body for deterministic replay
 
-	// Transport label distinguishes Bedrock vs direct API traffic (PRI-28)
+	// Transport label distinguishes Bedrock vs direct API traffic
 	transport     string // "direct" or "bedrock"
 	modelOverride string // Caller-injected model ID (Bedrock: from URL path, not body)
 }
@@ -359,7 +359,7 @@ func (e *LokiExporter) Push(entry map[string]interface{}, provider string) {
 	// Extract extended labels (PRI-298)
 	model, statusBucket, stream, hasTools, stopReason, ratelimitStatus := extractExtendedLabels(entry, logType)
 
-	// Extract transport and modelOverride from _meta (PRI-28)
+	// Extract transport and modelOverride from _meta
 	transport := "direct"
 	var modelOverride string
 	if meta, ok := entry["_meta"].(map[string]interface{}); ok {
@@ -506,7 +506,7 @@ func (e *LokiExporter) sendBatch(entries []lokiEntry) {
 			labels["error_type"] = entry.errorType
 		}
 
-		// Transport label distinguishes Bedrock vs direct API traffic (PRI-28)
+		// Transport label distinguishes Bedrock vs direct API traffic
 		if entry.transport != "" {
 			labels["transport"] = entry.transport
 		}
