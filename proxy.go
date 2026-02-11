@@ -243,6 +243,13 @@ func randomHex(n int) string {
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Route Bedrock requests before ParseProxyURL — Bedrock paths don't follow
+	// the /{provider}/{upstream}/{path} format
+	if strings.HasPrefix(r.URL.Path, "/model/") {
+		p.serveBedrock(w, r)
+		return
+	}
+
 	startTime := time.Now()
 
 	// Parse the proxy URL
@@ -472,6 +479,11 @@ func isJWTAuth(headers http.Header) bool {
 // isConversationEndpoint returns true for API endpoints that represent conversations
 // (i.e., have messages that can be tracked for session continuity)
 func isConversationEndpoint(path string) bool {
+	// Bedrock
+	if strings.HasPrefix(path, "/model/") {
+		return true
+	}
+
 	// Anthropic
 	if path == "/v1/messages" {
 		return true
