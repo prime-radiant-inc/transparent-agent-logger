@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -76,10 +77,27 @@ func NewServer(cfg Config) (*Server, error) {
 	eventEmitter := multiWriter.EventEmitter()
 	machineID := multiWriter.MachineID()
 
+	proxy := NewProxyWithEventEmitter(multiWriter, sessionManager, eventEmitter, machineID)
+
+	// Initialize Bedrock if region is configured
+	if cfg.BedrockRegion != "" {
+		bedrock, bedrockErr := initBedrock(cfg.BedrockRegion)
+		if bedrockErr != nil {
+			if lokiExporter != nil {
+				lokiExporter.Close()
+			}
+			sessionManager.Close()
+			fileLogger.Close()
+			return nil, bedrockErr
+		}
+		proxy.bedrock = bedrock
+		log.Printf("Bedrock: enabled (region=%s)", cfg.BedrockRegion)
+	}
+
 	s := &Server{
 		config:         cfg,
 		mux:            http.NewServeMux(),
-		proxy:          NewProxyWithEventEmitter(multiWriter, sessionManager, eventEmitter, machineID),
+		proxy:          proxy,
 		fileLogger:     fileLogger,
 		lokiExporter:   lokiExporter,
 		multiWriter:    multiWriter,
@@ -87,6 +105,7 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/health/loki", s.handleHealthLoki)
+	s.mux.HandleFunc("/health/bedrock", s.handleHealthBedrock)
 	return s, nil
 }
 
@@ -98,6 +117,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/health/loki" {
 		s.handleHealthLoki(w, r)
+		return
+	}
+	if r.URL.Path == "/health/bedrock" {
+		s.handleHealthBedrock(w, r)
 		return
 	}
 
@@ -144,6 +167,30 @@ func (s *Server) handleHealthLoki(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// BedrockHealthResponse is the JSON response for /health/bedrock endpoint
+type BedrockHealthResponse struct {
+	Status       string `json:"status"`
+	Region       string `json:"region,omitempty"`
+	DecodeErrors int64  `json:"decode_errors"`
+}
+
+func (s *Server) handleHealthBedrock(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.proxy.bedrock == nil {
+		json.NewEncoder(w).Encode(BedrockHealthResponse{
+			Status: "disabled",
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(BedrockHealthResponse{
+		Status:       "ok",
+		Region:       s.proxy.bedrock.region,
+		DecodeErrors: atomic.LoadInt64(&s.proxy.bedrock.decodeErrors),
+	})
 }
 
 func (s *Server) Close() error {

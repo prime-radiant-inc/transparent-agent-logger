@@ -305,3 +305,28 @@ func TestHealthLoki_Enabled(t *testing.T) {
 		t.Error("expected entries_dropped in response")
 	}
 }
+
+func TestHealthBedrock_Disabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+	defer srv.Close()
+
+	req := httptest.NewRequest("GET", "/health/bedrock", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse JSON: %v", err)
+	}
+	if response["status"] != "disabled" {
+		t.Errorf("expected status 'disabled', got %q", response["status"])
+	}
+}
