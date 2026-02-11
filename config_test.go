@@ -125,6 +125,40 @@ func TestLoadConfigFromEnv_LokiBatchSize(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromEnv_BedrockRegion(t *testing.T) {
+	t.Setenv("BEDROCK_REGION", "us-west-2")
+
+	cfg := LoadConfigFromEnv(DefaultConfig())
+
+	if cfg.BedrockRegion != "us-west-2" {
+		t.Errorf("expected BedrockRegion 'us-west-2', got %q", cfg.BedrockRegion)
+	}
+}
+
+func TestValidateBedrockRegion(t *testing.T) {
+	tests := []struct {
+		region  string
+		wantErr bool
+	}{
+		{"", false},           // empty = disabled, valid
+		{"us-west-2", false},  // supported
+		{"us-east-1", false},  // supported
+		{"us-east-2", false},  // supported
+		{"us-west-1", true},   // Bedrock not available
+		{"eu-west-1", true},   // not in our approved list
+		{"ap-southeast-1", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.region, func(t *testing.T) {
+			err := ValidateBedrockRegion(tt.region)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateBedrockRegion(%q) error = %v, wantErr %v", tt.region, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadConfigFromTOML_LokiSection(t *testing.T) {
 	tomlContent := `
 port = 8080

@@ -2,11 +2,19 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 
 	toml "github.com/pelletier/go-toml/v2"
 )
+
+// validBedrockRegions lists AWS regions where Bedrock is available for Claude models.
+var validBedrockRegions = map[string]bool{
+	"us-east-1": true,
+	"us-east-2": true,
+	"us-west-2": true,
+}
 
 // LokiConfig holds configuration for Loki log export
 type LokiConfig struct {
@@ -21,17 +29,18 @@ type LokiConfig struct {
 }
 
 type Config struct {
-	Port        int    `toml:"port"`
-	LogDir      string `toml:"log_dir"`
-	ServiceMode bool   `toml:"-"` // CLI-only, not persisted in config file
-	SetupShell  bool   `toml:"-"` // CLI-only, not persisted in config file
-	Env         bool   `toml:"-"` // CLI-only, not persisted in config file
-	Setup       bool   `toml:"-"` // CLI-only, not persisted in config file
-	Uninstall   bool   `toml:"-"` // CLI-only, not persisted in config file
-	Status      bool   `toml:"-"` // CLI-only, not persisted in config file
-	Explore     bool   `toml:"-"` // CLI-only, not persisted in config file
-	ExplorePort int    `toml:"explore_port"`
-	Loki        LokiConfig `toml:"loki"`
+	Port          int    `toml:"port"`
+	LogDir        string `toml:"log_dir"`
+	BedrockRegion string `toml:"bedrock_region"` // AWS region for Bedrock (empty = disabled)
+	ServiceMode   bool   `toml:"-"`              // CLI-only, not persisted in config file
+	SetupShell    bool   `toml:"-"`              // CLI-only, not persisted in config file
+	Env           bool   `toml:"-"`              // CLI-only, not persisted in config file
+	Setup         bool   `toml:"-"`              // CLI-only, not persisted in config file
+	Uninstall     bool   `toml:"-"`              // CLI-only, not persisted in config file
+	Status        bool   `toml:"-"`              // CLI-only, not persisted in config file
+	Explore       bool   `toml:"-"`              // CLI-only, not persisted in config file
+	ExplorePort   int    `toml:"explore_port"`
+	Loki          LokiConfig `toml:"loki"`
 }
 
 func DefaultConfig() Config {
@@ -57,6 +66,18 @@ func LoadConfigFromTOML(data []byte) (Config, error) {
 	return cfg, nil
 }
 
+// ValidateBedrockRegion returns an error if the region is non-empty and not a
+// known Bedrock-supported region.
+func ValidateBedrockRegion(region string) error {
+	if region == "" {
+		return nil
+	}
+	if !validBedrockRegions[region] {
+		return fmt.Errorf("unsupported Bedrock region %q (valid: us-east-1, us-east-2, us-west-2)", region)
+	}
+	return nil
+}
+
 func LoadConfigFromEnv(cfg Config) Config {
 	if port := os.Getenv("LLM_PROXY_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil {
@@ -65,6 +86,9 @@ func LoadConfigFromEnv(cfg Config) Config {
 	}
 	if logDir := os.Getenv("LLM_PROXY_LOG_DIR"); logDir != "" {
 		cfg.LogDir = logDir
+	}
+	if region := os.Getenv("BEDROCK_REGION"); region != "" {
+		cfg.BedrockRegion = region
 	}
 
 	// Loki configuration
