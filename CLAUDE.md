@@ -34,7 +34,7 @@ go test -v -run TestFunctionName ./...
 go test -v -run TestLive ./...
 
 # Run proxy manually
-./llm-proxy --port 8080
+./llm-proxy --port 12071
 
 # Run as background service (dynamic port, writes portfile)
 ./llm-proxy --service

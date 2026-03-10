@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -434,9 +435,15 @@ func copyHeaders(dst, src http.Header) {
 }
 
 // isLocalhost checks if the host is localhost for determining http vs https scheme.
-// Uses strings.HasPrefix for safety (avoids panics on short strings).
 func isLocalhost(host string) bool {
-	return strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "localhost")
+	hostname := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		hostname = h
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		return ip.IsLoopback()
+	}
+	return hostname == "localhost"
 }
 
 // isJWTAuth checks if the Authorization header contains a JWT token (ChatGPT OAuth)

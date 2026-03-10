@@ -45,7 +45,7 @@ func ParseCLIFlags(args []string) (CLIFlags, error) {
 	fs.BoolVar(&flags.Uninstall, "uninstall", false, "Uninstall: stop service, remove service file, remove shell patches, remove portfile")
 	fs.BoolVar(&flags.Status, "status", false, "Show proxy status and exit")
 	fs.BoolVar(&flags.Explore, "explore", false, "Start log explorer web UI")
-	fs.IntVar(&flags.ExplorePort, "explore-port", 8080, "Port for explorer web UI")
+	fs.IntVar(&flags.ExplorePort, "explore-port", 12071, "Port for explorer web UI")
 
 	if err := fs.Parse(args); err != nil {
 		return CLIFlags{}, err
@@ -186,7 +186,7 @@ func main() {
 
 		port := cfg.ExplorePort
 		if port == 0 {
-			port = 8080
+			port = 12071
 		}
 
 		explorer := NewExplorer(logDir)
@@ -200,24 +200,25 @@ func main() {
 			openBrowser(url)
 		}()
 
-		addr := fmt.Sprintf(":%d", port)
+		addr := fmt.Sprintf("localhost:%d", port)
 		if err := http.ListenAndServe(addr, explorer); err != nil {
 			log.Fatalf("Explorer server error: %v", err)
 		}
 		os.Exit(0)
 	}
 
-	// Service mode overrides: use dynamic port and default log dir
+	// Service mode overrides: default log dir
 	if cfg.ServiceMode {
-		// Use port 0 for dynamic assignment unless explicitly set via --port or config file
-		if flags.Port == 0 && cfg.Port == 0 {
-			cfg.Port = 0
-		}
+		// Port 0 is the default, so dynamic assignment happens automatically
+		// unless overridden via --port, config file, or env var.
 		// Use ~/.llm-provider-logs/ unless explicitly set via --log-dir
 		if flags.LogDir == "" {
 			home, _ := os.UserHomeDir()
 			cfg.LogDir = filepath.Join(home, ".llm-provider-logs")
 		}
+	} else if cfg.Port == 0 {
+		// Non-service mode: default to 12071 if no port was explicitly configured
+		cfg.Port = 12071
 	}
 
 	srv, err := NewServer(cfg)
@@ -230,7 +231,7 @@ func main() {
 	// all interfaces would allow unauthenticated access if security groups are
 	// misconfigured. In ECS awsvpc mode, localhost is shared between containers
 	// in the same task, so the PA container can still reach the proxy.
-	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
+	addr := fmt.Sprintf("localhost:%d", cfg.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error binding to %s: %v\n", addr, err)

@@ -122,7 +122,7 @@ The proxy **auto-detects** auth type from the `Authorization` header and routes 
 
 ```bash
 # This is all you need - works for BOTH API key and OAuth
-export OPENAI_BASE_URL=http://localhost:8080/openai/api.openai.com
+export OPENAI_BASE_URL=http://localhost:12071/openai/api.openai.com
 ```
 
 The proxy detects:

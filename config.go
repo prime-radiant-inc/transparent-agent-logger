@@ -45,7 +45,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		Port:   8080,
+		Port:   0,
 		LogDir: "./logs",
 		Loki: LokiConfig{
 			Enabled:      false,

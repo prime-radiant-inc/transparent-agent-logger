@@ -122,11 +122,11 @@ If you prefer not to use the background service:
 
 ```bash
 # Run proxy on a specific port
-llm-proxy --port 8080
+llm-proxy --port 12071
 
 # Configure clients manually
-export ANTHROPIC_BASE_URL=http://localhost:8080/anthropic/api.anthropic.com
-export OPENAI_BASE_URL=http://localhost:8080/openai/api.openai.com
+export ANTHROPIC_BASE_URL=http://localhost:12071/anthropic/api.anthropic.com
+export OPENAI_BASE_URL=http://localhost:12071/openai/api.openai.com
 ```
 
 ## AWS Bedrock Mode
@@ -177,7 +177,7 @@ All existing features (session tracking, fingerprinting, Loki export, log explor
 Browse and search your LLM logs with a web UI:
 
 ```bash
-llm-proxy --explore              # Opens browser to http://localhost:8080
+llm-proxy --explore              # Opens browser to http://localhost:12071
 llm-proxy --explore --explore-port 9000  # Use specific port
 ```
 

@@ -9,8 +9,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Port != 8080 {
-		t.Errorf("expected default port 8080, got %d", cfg.Port)
+	if cfg.Port != 0 {
+		t.Errorf("expected default port 0 (dynamic), got %d", cfg.Port)
 	}
 	if cfg.LogDir != "./logs" {
 		t.Errorf("expected default log dir './logs', got %q", cfg.LogDir)
@@ -161,7 +161,7 @@ func TestValidateBedrockRegion(t *testing.T) {
 
 func TestLoadConfigFromTOML_LokiSection(t *testing.T) {
 	tomlContent := `
-port = 8080
+port = 12071
 
 [loki]
 enabled = true

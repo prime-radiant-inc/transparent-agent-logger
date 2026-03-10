@@ -45,7 +45,7 @@ func TestLiveAnthropicProxy(t *testing.T) {
 
 	// Start our proxy server
 	tmpDir := t.TempDir()
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestLiveAnthropicProxyWithLogging(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Start our proxy server with logging
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestLiveAnthropicStreamingProxy(t *testing.T) {
 	apiKey := loadAPIKey(t)
 	tmpDir := t.TempDir()
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestLiveMultiTurnConversation(t *testing.T) {
 	apiKey := loadAPIKey(t)
 	tmpDir := t.TempDir()
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}

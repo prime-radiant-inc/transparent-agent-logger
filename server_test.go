@@ -12,7 +12,7 @@ import (
 
 func TestHealthEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestServerProxiesRequests(t *testing.T) {
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
 	tmpDir := t.TempDir()
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestServerProxiesRequests(t *testing.T) {
 func TestNewServer_LokiDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Port:   8080,
+		Port:   12071,
 		LogDir: tmpDir,
 		Loki: LokiConfig{
 			Enabled: false,
@@ -91,7 +91,7 @@ func TestNewServer_LokiDisabled(t *testing.T) {
 func TestNewServer_LokiEnabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Port:   8080,
+		Port:   12071,
 		LogDir: tmpDir,
 		Loki: LokiConfig{
 			Enabled:      true,
@@ -131,7 +131,7 @@ func TestNewServer_LokiInvalidURL(t *testing.T) {
 	defer log.SetOutput(nil)
 
 	cfg := Config{
-		Port:   8080,
+		Port:   12071,
 		LogDir: tmpDir,
 		Loki: LokiConfig{
 			Enabled: true,
@@ -166,7 +166,7 @@ func TestNewServer_LokiInvalidURL(t *testing.T) {
 func TestHealthLoki_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Port:   8080,
+		Port:   12071,
 		LogDir: tmpDir,
 		Loki: LokiConfig{
 			Enabled: false,
@@ -202,7 +202,7 @@ func TestHealthLoki_Disabled(t *testing.T) {
 func TestNewServer_EventEmitterWiredUp(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Port:   8080,
+		Port:   12071,
 		LogDir: tmpDir,
 		Loki: LokiConfig{
 			Enabled:      true,
@@ -236,7 +236,7 @@ func TestNewServer_EventEmitterWiredUp(t *testing.T) {
 func TestNewServer_EventEmitterNilWhenLokiDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Port:   8080,
+		Port:   12071,
 		LogDir: tmpDir,
 		Loki: LokiConfig{
 			Enabled: false,
@@ -259,7 +259,7 @@ func TestNewServer_EventEmitterNilWhenLokiDisabled(t *testing.T) {
 func TestHealthLoki_Enabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := Config{
-		Port:   8080,
+		Port:   12071,
 		LogDir: tmpDir,
 		Loki: LokiConfig{
 			Enabled:      true,
@@ -308,7 +308,7 @@ func TestHealthLoki_Enabled(t *testing.T) {
 
 func TestHealthBedrock_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}

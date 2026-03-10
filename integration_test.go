@@ -29,7 +29,7 @@ func TestProxySessionTracking(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestProxySessionContinuationWithClientSessionID(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestProxyNoClientSessionIDCreatesNewSessions(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestProxyNonConversationEndpointSkipsLogging(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestProxyOpenAIChatCompletionsLogging(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestProxyOpenAIResponsesAPILogging(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestProxyOpenAISessionContinuation(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestProxyOpenAIEmbeddingsSkipped(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestProxyOpenAIHeaderSessionID(t *testing.T) {
 
 	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}

@@ -25,7 +25,7 @@ func TestSessionDetection_NoClientSessionID(t *testing.T) {
 	apiKey := loadAPIKey(t)
 	tmpDir := t.TempDir()
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestSessionDetection_SameClientSessionID(t *testing.T) {
 	apiKey := loadAPIKey(t)
 	tmpDir := t.TempDir()
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestSessionDetection_DifferentClientSessionIDs(t *testing.T) {
 	apiKey := loadAPIKey(t)
 	tmpDir := t.TempDir()
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestSessionDetection_MixedScenario(t *testing.T) {
 	apiKey := loadAPIKey(t)
 	tmpDir := t.TempDir()
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestSessionDetection_ThreeRequestContinuation(t *testing.T) {
 	apiKey := loadAPIKey(t)
 	tmpDir := t.TempDir()
 
-	srv, err := NewServer(Config{Port: 8080, LogDir: tmpDir})
+	srv, err := NewServer(Config{Port: 12071, LogDir: tmpDir})
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
